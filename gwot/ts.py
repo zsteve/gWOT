@@ -1,3 +1,5 @@
+import numpy as np
+
 class TimeSeries():
     def __init__(self, x, t_idx, D = None):
         self.x = x

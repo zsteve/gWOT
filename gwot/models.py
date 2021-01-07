@@ -10,8 +10,9 @@ import dill
 from scipy.sparse.linalg import aslinearoperator, eigs, LinearOperator
 from scipy import matrix
 
-from lambertw import lambertw
-from timeseries import TimeSeries
+from gwot.lambertw import lambertw
+from gwot.ts import TimeSeries
+from gwot.sim import Simulation
 
 class OTModel(torch.nn.Module):
     def __init__(self, ts, 

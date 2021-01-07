@@ -9,8 +9,6 @@ import autograd.numpy as np
 from pathos.multiprocessing import ProcessingPool as Pool
 import copy
 
-import gwot
-
 # Simulations
 
 def dW(dt, sz):

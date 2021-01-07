@@ -9,8 +9,8 @@ import autograd.numpy as np
 from pathos.multiprocessing import ProcessingPool as Pool
 import copy
 
-from timeseries import TimeSeries
-from util import sde_integrate
+from gwot.ts import TimeSeries
+from gwot.util import sde_integrate
 
 class Simulation(TimeSeries):
     def __init__(self, V, dV, N, T, d, D, t_final, ic_func, pool, birth_death = False, birth = None, death = None):
