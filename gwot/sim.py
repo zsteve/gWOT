@@ -51,14 +51,14 @@ class Simulation(TimeSeries):
         self.time_idx = np.concatenate([np.array([i]).repeat(self.snaps[i].shape[0]) for i in range(0, len(self.snaps))])
         return self.snaps
 
-    def sample_trajectory(self):
-        ic = self.ic_func(1, self.d)
+    def sample_trajectory(self, steps_scale = 1, N = 1):
+        ic = self.ic_func(N, self.d)
         snap, snap_mask = sde_integrate(self.dV, nu = self.D, x0 = ic,
             b = self.birth, d = self.death, 
             t = self.t_final, 
-            steps = self.T, 
-            snaps = np.arange(self.T)) 
-        return snap[snap_mask, :]
+            steps = self.T*steps_scale, 
+            snaps = np.arange(self.T)*steps_scale) 
+        return np.moveaxis(snap, 0, 1)
 
     def __copy__(self):
         return Simulation(V = self.V, dV = self.dV, N = self.N, T = self.T, d = self.d, D = self.D, t_final = self.t_final,
