@@ -37,7 +37,7 @@ class OTModel(torch.nn.Module):
         self.ts = ts
         self.lamda = lamda
         self.D = ts.D if D is None else D
-        self.time_idx = torch.from_numpy(ts.time_idx).to(self.device)
+        self.t_idx = torch.from_numpy(ts.t_idx).to(self.device)
         self.dt = torch.from_numpy(ts.dt).to(self.device)
         self.eps = torch.from_numpy(2*self.D*ts.dt).to(self.device) if eps is None else eps
         self.eps_df = eps_df
@@ -119,7 +119,7 @@ class OTModel(torch.nn.Module):
         if v_hat is None:
             v_hat = torch.zeros(self.ts.T, self.ts.x.shape[0], device = self.device)
         for i in range(0, self.ts.T):
-            v_hat[i, i != self.ts.time_idx] = -self.lamda_i[i]
+            v_hat[i, i != self.ts.t_idx] = -self.lamda_i[i]
         self.register_parameter(name = 'u_hat', param = torch.nn.Parameter(Variable(u_hat, requires_grad = True)))
         self.register_parameter(name = 'v_hat', param = torch.nn.Parameter(Variable(v_hat, requires_grad = True)))
         
@@ -128,7 +128,7 @@ class OTModel(torch.nn.Module):
 
     def Xent_star(self, u, i):
         # Legendre transform of cross-entropy data-fitting term
-        val = -torch.sum(torch.log(1 - u[self.time_idx == i]))/torch.sum(self.time_idx == i)
+        val = -torch.sum(torch.log(1 - u[self.t_idx == i]))/torch.sum(self.t_idx == i)
         if torch.isnan(val):
             val = torch.tensor(float("Inf"), device = self.device)
         return val
@@ -228,8 +228,8 @@ class OTModel(torch.nn.Module):
             return (alpha*(torch.log(alpha/beta)) - alpha + beta).sum()
         def eval_primal_Xent_df(model, i):
             p_hat = model.get_P_hat(i)
-            N = 1.0*(model.time_idx == i).sum()
-            return ((1/N)*(-torch.log(p_hat[model.time_idx == i]/model.m_i[i]) - torch.log(N))).sum() - 1 + \
+            N = 1.0*(model.t_idx == i).sum()
+            return ((1/N)*(-torch.log(p_hat[model.t_idx == i]/model.m_i[i]) - torch.log(N))).sum() - 1 + \
                         p_hat.sum()/model.m_i[i]
         def eval_primal_growth_KL(model, i, R):
             r = R[i, :]
@@ -410,9 +410,9 @@ class OTModel(torch.nn.Module):
                                         - float(j == 0)*c/(self.lamda*self.D) )
                 for j in range(self.ts.T):
                     self.v_hat[j, :] = self.eps_df[j]*lambertw((self.lamda_i[j]/self.eps_df[j]) * \
-                                                                (1.0/(1.0*torch.sum(self.time_idx == j))) * \
+                                                                (1.0/(1.0*torch.sum(self.t_idx == j))) * \
                                                                 1/(K_df(j).T @ torch.exp(self.u_hat[j]/self.eps_df[j])))
-                    self.v_hat[j, self.time_idx != j] = 0
+                    self.v_hat[j, self.t_idx != j] = 0
                 c = self.lamda*self.D*torch.log(torch.sum(torch.exp((-self.w[0]*self.u_hat[0, :])/(self.lamda*self.D)) * z1(0, c) * z2(0, c)))
                 if i % print_interval == 0:
                     with torch.no_grad():
@@ -442,7 +442,7 @@ class OTModel(torch.nn.Module):
                 obj = self.dual_obj()
                 obj.backward()
                 for j in range(0, self.ts.T):
-                    self.v_hat.grad[j, self.time_idx != j] = 0
+                    self.v_hat.grad[j, self.t_idx != j] = 0
                 return obj
             ## 
             with torch.no_grad():
@@ -540,11 +540,11 @@ class OTModel_kl(OTModel):
         else:
             u = u0
         for i in range(0, self.ts.T):
-            u[i, i != self.ts.time_idx] = -self.w[i]/(self.lamda*self.D) # 0
+            u[i, i != self.ts.t_idx] = -self.w[i]/(self.lamda*self.D) # 0
         self.register_parameter(name = 'u', param = torch.nn.Parameter(Variable(u, requires_grad = True)))
         
     def F_star(self, u, i):
-        val = (-torch.sum(self.time_idx == i) - torch.sum(torch.log(-u[self.time_idx == i])))/torch.sum(self.time_idx == i)
+        val = (-torch.sum(self.t_idx == i) - torch.sum(torch.log(-u[self.t_idx == i])))/torch.sum(self.t_idx == i)
         if torch.isnan(val):
             val = torch.tensor(float("Inf"), device = self.device)
         return val
@@ -609,7 +609,7 @@ class OTModel_kl(OTModel):
             return x/x.sum()
         with torch.no_grad():
             p_all = self.get_P()
-        return self.lamda*self.D*reg() + torch.dot(self.w, torch.stack([xent(normalise((self.time_idx == i)*1.0), p_all[i, :]) for i in range(self.ts.T)]))
+        return self.lamda*self.D*reg() + torch.dot(self.w, torch.stack([xent(normalise((self.t_idx == i)*1.0), p_all[i, :]) for i in range(self.ts.T)]))
 
     def get_gamma_branch(self, i):
         pass
@@ -653,7 +653,7 @@ class OTModel_kl(OTModel):
                 obj = self.dual_obj()
                 obj.backward()
                 for j in range(0, self.ts.T):
-                    self.u.grad[j, self.time_idx != j] = 0
+                    self.u.grad[j, self.t_idx != j] = 0
                 return obj
             ## 
             with torch.no_grad():
@@ -686,7 +686,7 @@ class OTModel_ot(OTModel):
 
     def Xent_star(self, u, i):
         # Code for OT-only data fitting (i.e. F(a, b) = indicator(a = b))
-        p = (1.0*(self.time_idx == i))
+        p = (1.0*(self.t_idx == i))
         p = p/p.sum()
         return torch.sum(p * u)
     

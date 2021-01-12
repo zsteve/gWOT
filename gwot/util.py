@@ -71,43 +71,11 @@ def sde_integrate(dV, nu, x0, t, steps, birth_death = False, b = None, d = None,
             snap_mask[np.where(i == snaps)[0]] = x_mask
     return snap, snap_mask
 
-# Distances and interpolation
+# Distances
 
 def empirical_dist(mu_spt, nu_spt, max_iter = 1000000):
     C = sklearn.metrics.pairwise_distances(mu_spt, nu_spt, metric = 'sqeuclidean')
     return ot.emd2(np.ones(mu_spt.shape[0])/mu_spt.shape[0], np.ones(nu_spt.shape[0])/nu_spt.shape[0], C, numItermax = max_iter)
-
-def geo_interp_wot(ot_model, t0, t1, N = 100, interp_frac = 0.5, coord_to_use = 'X_pca_orig', tmap = None):
-    if tmap is None:
-        T = torch.tensor(ot_model.compute_transport_map(t0, t1).X, dtype = torch.float64)
-    else:
-        T = torch.tensor(tmap.X, dtype = torch.float64)
-    adata = ot_model.matrix
-    T_norm = T @ torch.diag(1/(T.sum(dim = 0)**(1 - interp_frac)))
-    T_norm = (T_norm/T_norm.sum()).flatten().cpu()
-    # p = torch.distributions.categorical.Categorical(probs = T_norm)
-    # samp = p.sample(sample_shape = torch.Size([N]))
-    samp = np.random.choice(T_norm.shape[0], size = N, p = T_norm.cpu())
-    out = torch.zeros(N, adata.obsm[coord_to_use].shape[1])
-    for k in range(0, N):
-        idx_i = samp[k] // T.shape[1]
-        idx_j = samp[k] % T.shape[1]
-        x0 = torch.from_numpy(adata.obsm[coord_to_use][adata.obs.day == t0, :][idx_i.item(), :])
-        x1 = torch.from_numpy(adata.obsm[coord_to_use][adata.obs.day == t1, :][idx_j.item(), :])
-        out[k, :] = x0 + interp_frac*(x1 - x0)
-    return out
-
-def get_C_mean(adata_s, t, t_next = None, mode = "tr"):
-    if mode == "tr":
-        C = sklearn.metrics.pairwise_distances(adata_s.obsm['X_pca'][adata_s.obs.day == t, :], adata_s.obsm['X_pca'][adata_s.obs.day == t_next, :], metric = 'sqeuclidean')
-    elif mode == "self":
-        C = sklearn.metrics.pairwise_distances(adata_s.obsm['X_pca'][adata_s.obs.day == t, :], adata_s.obsm['X_pca'][adata_s.obs.day == t, :], metric = 'sqeuclidean')
-    return np.mean(C)
-
-def subsamp(adata, day, size):
-    idx = np.nonzero(np.array((adata.obs.day == day).array))[0]
-    idx_samp = np.random.choice(idx, size = size, replace = False)
-    return adata[idx_samp, :]
 
 # kernel method
 
@@ -117,13 +85,13 @@ def ker_smooth(m, h):
     k = lambda r: math.exp(-(r/h)**2)
     for i in range(0, m.ts.T):
         for j in range(0, m.ts.T):
-            w_smoothed[i, m.time_idx == j] = k(t_map[j] - t_map[i])
+            w_smoothed[i, m.t_idx == j] = k(t_map[j] - t_map[i])
 
     w_smoothed = ((w_smoothed.T/w_smoothed.sum(dim = 1)).T)
     return w_smoothed
 
 def pi0_kde(ts, bw_method = None, num_times = 1):
-    pi0_kde = sp.stats.gaussian_kde(ts.x[np.isin(ts.time_idx, np.arange(num_times)), :].T, bw_method = bw_method)
+    pi0_kde = sp.stats.gaussian_kde(ts.x[np.isin(ts.t_idx, np.arange(num_times)), :].T, bw_method = bw_method)
     pi0 = torch.Tensor(pi0_kde(ts.x.T))
     return pi0/pi0.sum()
 

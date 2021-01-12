@@ -48,7 +48,7 @@ class Simulation(TimeSeries):
             for i in range(0, len(self.snaps)):
                 self.snaps[i] = self.snaps[i][np.random.choice(samp_sizes[i], size = min(samp_sizes[i], trunc)), :]
         self.x = np.vstack(self.snaps) 
-        self.time_idx = np.concatenate([np.array([i]).repeat(self.snaps[i].shape[0]) for i in range(0, len(self.snaps))])
+        self.t_idx = np.concatenate([np.array([i]).repeat(self.snaps[i].shape[0]) for i in range(0, len(self.snaps))])
         return self.snaps
 
     def sample_trajectory(self, steps_scale = 1, N = 1):
