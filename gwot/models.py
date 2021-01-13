@@ -341,7 +341,7 @@ class OTModel(torch.nn.Module):
 
     def get_K(self, i):
         if self.C is None:
-            self.C = sklearn.metrics.pairwise_distances(self.ts.x, self.ts.x, metric = 'sqeuclidean')
+            self.C = sklearn.metrics.pairwise_distances(self.ts.x, metric = 'sqeuclidean')
         K = torch.exp(-torch.from_numpy(self.C).to(self.device)/float(self.c_scale[i]*self.eps[i]))
         K = (K.T/K.sum(1)).T
         if i == 0 and self.pi_0 is not None:
@@ -350,7 +350,7 @@ class OTModel(torch.nn.Module):
     
     def get_K_df(self, i):
         if self.C is None:
-            self.C = sklearn.metrics.pairwise_distances(self.ts.x, self.ts.x, metric = 'sqeuclidean')
+            self.C = sklearn.metrics.pairwise_distances(self.ts.x, metric = 'sqeuclidean')
         K_df = torch.exp(-torch.from_numpy(self.C).to(self.device)/float(self.c_scale_df[i]*self.eps_df[i]))
         K_df = (K_df.T/K_df.sum(1)).T
         return K_df
@@ -626,7 +626,7 @@ class OTModel_kl(OTModel):
 
     def get_K(self, i):
         if self.C is None:
-            self.C = sklearn.metrics.pairwise_distances(self.ts.x, self.ts.x, metric = 'sqeuclidean')
+            self.C = sklearn.metrics.pairwise_distances(self.ts.x, metric = 'sqeuclidean')
         K = torch.exp(-torch.Tensor(self.C, device = self.device)/float(self.c_scale[i]*self.eps[i]))
         K = (K.T/K.sum(1)).T
         if i == 0 and self.pi_0 is not None:
@@ -635,7 +635,7 @@ class OTModel_kl(OTModel):
     
     def get_K_df(self, i):
         if self.C is None:
-            self.C = sklearn.metrics.pairwise_distances(self.ts.x, self.ts.x, metric = 'sqeuclidean')
+            self.C = sklearn.metrics.pairwise_distances(self.ts.x, metric = 'sqeuclidean')
         K_df = torch.exp(-torch.Tensor(self.C, device = self.device)/float(self.c_scale_df[i]*self.eps_df[i]))
         K_df = (K_df.T/K_df.sum(1)).T
         return K_df
