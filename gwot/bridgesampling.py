@@ -31,16 +31,20 @@ def sample_coupling(gamma, N = 1, norm = True):
     samp = np.random.choice(gamma_norm.shape[0], size = N, p = gamma_norm)
     return samp // gamma.shape[1], samp % gamma.shape[1]
 
-def sample_paths(gamma_all, N = 1, coord = False, x_all = None):
+def sample_paths(gamma_all, N = 1, coord = False, x_all = None, get_gamma_fn = None, num_couplings = None):
     def path_idx_to_coord(paths, x_all):
         return np.array([[x_all[j][paths[i, j]] for j in range(paths.shape[1])] for i in range(paths.shape[0])])
     def sample_conditional(idx, gamma):
         return np.array([np.random.choice(gamma.shape[1], size = 1, p = (gamma[i, :]/gamma[i, :].sum()).flatten()) for i in idx]).flatten()
     idx_all = []
-    idx0, idx1 = sample_coupling(gamma_all[0], N = N)
+    if gamma_all is not None:
+        num_couplings = len(gamma_all)
+    gamma = gamma_all[0] if gamma_all is not None else get_gamma_fn(0)
+    idx0, idx1 = sample_coupling(gamma, N = N)
     idx_all += [idx0, idx1]
-    for i in range(1, len(gamma_all)):
-        idx_all += [sample_conditional(idx_all[-1], gamma_all[i]), ]
+    for i in range(1, num_couplings):
+        gamma = gamma_all[i] if gamma_all is not None else get_gamma_fn(i)
+        idx_all += [sample_conditional(idx_all[-1], gamma), ]
     paths = np.array(idx_all).T
     if coord:
         return path_idx_to_coord(paths, x_all)
