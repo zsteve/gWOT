@@ -77,6 +77,10 @@ def empirical_dist(mu_spt, nu_spt, max_iter = 1000000):
     C = sklearn.metrics.pairwise_distances(mu_spt, nu_spt, metric = 'sqeuclidean')
     return ot.emd2(np.ones(mu_spt.shape[0])/mu_spt.shape[0], np.ones(nu_spt.shape[0])/nu_spt.shape[0], C, numItermax = max_iter)
 
+def empirical_entropic_coupling(mu_spt, nu_spt, eps, max_iter = 5000, method = "sinkhorn"):
+    C = sklearn.metrics.pairwise_distances(mu_spt, nu_spt, metric = 'sqeuclidean')
+    return ot.sinkhorn(np.ones(mu_spt.shape[0])/mu_spt.shape[0], np.ones(nu_spt.shape[0])/nu_spt.shape[0], C, eps, numItermax = max_iter, method = method)
+
 # kernel method
 
 def ker_smooth(m, h):
