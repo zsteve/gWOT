@@ -136,7 +136,7 @@ class OTModel(torch.nn.Module):
     def logKexp(self, K, x):
         # returns log(K @ exp(x))
         if self.use_keops:
-            if type(x) is not pykeops.common.lazy_tensor.LazyTensor:
+            if type(x) is not pykeops.torch.LazyTensor:
                 x = LazyTensor(x.view(1, -1, 1))
             return x.logsumexp(dim = 1, weight = K).view(-1)
         else:
@@ -146,9 +146,9 @@ class OTModel(torch.nn.Module):
     def logsumexp_weight(self, w, x, dim = 1):
         # returns log(w * exp(x))
         if self.use_keops:
-            if type(x) is not pykeops.common.lazy_tensor.LazyTensor:
+            if type(x) is not pykeops.torch.LazyTensor:
                 x = LazyTensor(x)
-            if type(w) is not pykeops.common.lazy_tensor.LazyTensor:
+            if type(w) is not pykeops.torch.LazyTensor:
                 w = LazyTensor(w)
             return x.logsumexp(weight = w, dim = dim).view(-1)
         else:
@@ -281,7 +281,7 @@ class OTModel(torch.nn.Module):
             x = self.logKexp(self.K_ij[i], g.view(1, -1, 1)).view(-1)
             # x_ = (K @ torch.exp(v/self.eps[i])).log()
             alpha = self.get_P(i)
-            if type(K) is pykeops.common.lazy_tensor.LazyTensor:
+            if type(K) is pykeops.torch.LazyTensor:
                 # return LazyTensor(alpha.view(alpha.shape[0], 1), axis = 0) * K * LazyTensor((g.view(1, g.shape[0]) - x.view(x.shape[0], 1)).exp())
                 return LazyTensor(alpha.view(-1, 1), axis = 0) * K * \
                         (LazyTensor(g.view(1, -1, 1)) - LazyTensor(x.view(-1, 1, 1))).exp()
@@ -297,7 +297,7 @@ class OTModel(torch.nn.Module):
             # x_i = LazyTensor(x.view(u0.shape[0], 1, 1))
             # logZ = x_i.logsumexp(dim = 0, weight = f_i.exp())           
             logZ = self.logsumexp_weight(torch.exp(u0/self.eps[0]).view(-1, 1, 1), x.view(-1, 1, 1), dim = 0).item()
-            if type(K) is pykeops.common.lazy_tensor.LazyTensor:
+            if type(K) is pykeops.torch.LazyTensor:
                 return LazyTensor((u0/self.eps[0]).view(-1, 1, 1)).exp() * K * \
                         (LazyTensor((v0/self.eps[0]).view(1, -1, 1)) - logZ).exp()
             else:
