@@ -21,6 +21,11 @@ The underlying model assumption on which gWOT is based is that the generative pr
 
 Cells in this process also divide and die at rates `beta(x, t)` and `delta(x, t)` respectively.
 
+## Installation
+
+To install, use `pip install gwot`.
+
+Alternatively, clone this repository and `cd gWOT && pip install .`
 
 ## Example application: bistable landscape with branching
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zsteve/gWOT/blob/main/examples/gWOT_example.ipynb)
