@@ -30,5 +30,5 @@ Cells in this process also divide and die at rates `beta(x, t)` and `delta(x, t)
 This code accompanies the paper (TBA on arXiv)
 ```
 Hugo Lavenant, Stephen Zhang, Young-Heon Kim, and Geoffrey Schiebinger.
-Towards a mathematical theory of trajectory inference.
+Towards a mathematical theory of trajectory inference, 2021. 
 ```
