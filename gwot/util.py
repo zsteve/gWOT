@@ -8,6 +8,8 @@ import autograd
 import autograd.numpy as np
 from pathos.multiprocessing import ProcessingPool as Pool
 import copy
+import sklearn
+from sklearn import metrics
 
 # Simulations
 
