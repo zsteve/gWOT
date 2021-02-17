@@ -1,5 +1,8 @@
-# gWOT
-Global Waddington-OT
+# gWOT: Global Waddington-OT
+
+![Example sample path reconstruction](aux_files/illustration.png)
+
+![Diffusion-drift SDE](aux_files/sde.png)
 
 
 ## Example application: bistable landscape with branching
