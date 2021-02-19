@@ -13,6 +13,24 @@ from gwot.ts import TimeSeries
 from gwot.util import sde_integrate
 
 class Simulation(TimeSeries):
+    """Diffusion-drift SDE simulation class
+    
+    :param V: potential function `V(x, t)` 
+    :param dV: potential gradient `dV(x, t)`
+    :param N: number of initial particles to use, `N[i]` corresponds to time point `i`
+    :param T: number of timepoints 
+    :param d: dimension of simulation
+    :param D: diffusivity
+    :param t_final: final time (initial time is always 0)
+    :param ic_func: function accepting arguments `(N, d)` and returning an array `X` of dimensions `(N, d)`
+                    where `X[i, :]` corresponds to the `i`th initial particle position
+    :param pool: ProcessingPool to use for parallel computation (or `None`)
+    :param birth_death: whether to incorporate birth-death process
+    :param birth: if `birth_death == True`, a function accepting arguments `(X, t)` returning 
+                    a vector of birth rates for each row in `X`
+    :param death: if `birth_death == True`, a function accepting arguments `(X, t)` returning 
+                    a vector of death rates for each row in `X`
+    """
     def __init__(self, V, dV, N, T, d, D, t_final, ic_func, pool, birth_death = False, birth = None, death = None):
         self.V = V
         self.dV = dV
