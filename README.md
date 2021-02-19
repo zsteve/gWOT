@@ -32,8 +32,7 @@ Alternatively, clone this repository and `cd gWOT && pip install .`
 
 ## Paper
 
-This code accompanies the paper (TBA on arXiv)
+This code accompanies the paper [(arXiv link)](https://arxiv.org/abs/2102.09204)
 ```
-Hugo Lavenant, Stephen Zhang, Young-Heon Kim, and Geoffrey Schiebinger.
-Towards a mathematical theory of trajectory inference, 2021. 
+Lavenant, H., Zhang, S., Kim, Y., & Schiebinger, G. (2021). Towards a mathematical theory of trajectory inference.
 ```
