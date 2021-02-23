@@ -39,8 +39,8 @@ class OTModel(torch.nn.Module):
     :param u_hat: `torch.Tensor` of initial values for `u_hat`. If `None`, we initialise with zeros.
     :param v_hat: `torch.Tensor` of initial values for `v_hat`. If `None`, we initialise with zeros.
     :param pi_0: `torch.Tensor` of initial distribution to use, 
-            or else a choice of "uniform" (uniform on the space $\overline{\mathcal{X}}$) 
-            or "stationary" (stationary distribution of heat kernel on $\overline{\mathcal{X}}$)
+            or else a choice of "uniform" (uniform on the space :math:`\overline{\mathcal{X}}`) 
+            or "stationary" (stationary distribution of heat kernel on :math:`\overline{\mathcal{X}}`)
     :param device: Device to use with PyTorch. 
     :param use_keops: `True` to use KeOps for on-the-fly kernel reductions. Otherwise all kernels
             are precomputed and stored in memory. 
