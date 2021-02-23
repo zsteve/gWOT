@@ -1,10 +1,10 @@
 # gWOT: Global Waddington-OT
 
+[![PyPI version](https://badge.fury.io/py/gwot.svg)](https://badge.fury.io/py/gwot) [![Documentation Status](https://readthedocs.org/projects/gwot/badge/?version=latest)](https://gwot.readthedocs.io/en/latest/?badge=latest)
+
 Principled trajectory inference for time-series data with limited samples by optimal transport.
 
 *Important: this README is currently under construction. Check back soon!*
-
-[![PyPI version](https://badge.fury.io/py/gwot.svg)](https://badge.fury.io/py/gwot) [![Documentation Status](https://readthedocs.org/projects/gwot/badge/?version=latest)](https://gwot.readthedocs.io/en/latest/?badge=latest)
 
 ## Introduction
 
