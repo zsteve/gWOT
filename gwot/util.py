@@ -14,10 +14,24 @@ from sklearn import metrics
 # Simulations
 
 def dW(dt, sz):
-    # Wiener process increments 
+    """ Wiener process increments of size `sz`
+    """
     return np.sqrt(dt)*np.random.standard_normal(sz)
 
 def sde_integrate(dV, nu, x0, t, steps, birth_death = False, b = None, d = None, g_max = 50, snaps = None):
+    """Integrate SDE using Euler-Maruyama method (with birth-death)
+    
+    :param dV: function `dV(x, t)` specifying the drift field
+    :param nu: diffusivity
+    :param x0: initial particle positions at time `t = 0`
+    :param steps: time steps to use in Euler-Maruyama method
+    :param birth_death: `True` if simulation needs birth-death
+    :param b: if `birth_death == True`, birth rate `b(x, t)`
+    :param d: if `birth_death == True`, death rate `d(x, t)`
+    :param g_max: if `birth_death == True`, we store `g_max*x0.shape[0]` particles 
+                and error if exceeded.
+    :param snaps: `np.array` of step indices at which to record particle snapshot. 
+    """
     if birth_death:
         # store g_max*x0.size[0] particles. Output error if we try and exceed this, though.
         # g = g(x, t) = b(x, t) - d(x, t)
@@ -76,16 +90,35 @@ def sde_integrate(dV, nu, x0, t, steps, birth_death = False, b = None, d = None,
 # Distances
 
 def empirical_dist(mu_spt, nu_spt, max_iter = 1000000):
+    """Compute :math:`W_2` distance between two empirical distributions
+
+    :param mu_spt: support of measure :math:`\mu`
+    :param nu_spt: support of measure :math:`\nu`
+    :param max_iter: passed to `ot.emd2`
+    """
     C = sklearn.metrics.pairwise_distances(mu_spt, nu_spt, metric = 'sqeuclidean')
     return ot.emd2(np.ones(mu_spt.shape[0])/mu_spt.shape[0], np.ones(nu_spt.shape[0])/nu_spt.shape[0], C, numItermax = max_iter)
 
 def empirical_entropic_coupling(mu_spt, nu_spt, eps, max_iter = 5000, method = "sinkhorn"):
+    """Compute entropy-regularised OT coupling between two empirical distributions
+
+    :param mu_spt: support of measure :math:`\mu`
+    :param nu_spt: support of measure :math:`\nu`
+    :param eps: regularisation parameter to use 
+    :param max_iter: passed to `ot.sinkhorn`
+    :param method: passed to `ot.sinkhorn`
+    """
     C = sklearn.metrics.pairwise_distances(mu_spt, nu_spt, metric = 'sqeuclidean')
     return ot.sinkhorn(np.ones(mu_spt.shape[0])/mu_spt.shape[0], np.ones(nu_spt.shape[0])/nu_spt.shape[0], C, eps, numItermax = max_iter, method = method)
 
 # kernel method
 
 def ker_smooth(m, h):
+    """Kernel smoothing in time domain 
+    
+    :param m: OTModel
+    :param h: bandwidth of kernel-in-time
+    """
     w_smoothed = torch.zeros(m.ts.T, m.x.shape[0])
     t_map = np.concatenate([np.array([0, ]), np.cumsum(m.ts.dt)])
     k = lambda r: math.exp(-(r/h)**2)
@@ -97,6 +130,12 @@ def ker_smooth(m, h):
     return w_smoothed
 
 def pi0_kde(ts, bw_method = None, num_times = 1):
+    """Compute initial distribution :math:`\pi_0` as KDE estimate 
+    
+    :param ts: TimeSeries object
+    :param bw_method: KDE bandwidth estimation method (passed to `scipy.stats.gaussian_kde`)
+    :param num_times: compute KDE of the first `num_times` timepoints. 
+    """
     pi0_kde = sp.stats.gaussian_kde(ts.x[np.isin(ts.t_idx, np.arange(num_times)), :].T, bw_method = bw_method)
     pi0 = torch.Tensor(pi0_kde(ts.x.T))
     return pi0/pi0.sum()
@@ -104,8 +143,9 @@ def pi0_kde(ts, bw_method = None, num_times = 1):
 # assorted util
 
 def density_to_grid(d, x, n = (100, 100), box = np.array([[-1, -1], [1, 1]])*2):
-    # Discretize a 2D distribution with weights d supported on x onto a regular grid
-    # with n = (n_x, n_y) grid elements, corresponding to box. 
+    """Discretize a 2D distribution with weights `d` supported on `x` onto a regular grid
+        with `n = (n_x, n_y)` grid elements, corresponding to `box`. 
+    """
     grid = np.zeros(n)
     box_w = box[1, 0] - box[0, 0]
     box_h = box[1, 1] - box[0, 1]
@@ -118,7 +158,9 @@ def density_to_grid(d, x, n = (100, 100), box = np.array([[-1, -1], [1, 1]])*2):
     return grid
 
 def density_to_grid_1d(d, x, n = 100, box = np.array([-1, 1])*2):
-    # 1D version of density_to_grid()
+    """Discretize a 1D distribution with weights `d` supported on `x` onto a regular grid
+        with `n` grid elements, corresponding to `box`. 
+    """
     grid = np.zeros(n)
     box_w = box[1] - box[0]
     for p in range(0, x.shape[0]):
@@ -129,7 +171,9 @@ def density_to_grid_1d(d, x, n = 100, box = np.array([-1, 1])*2):
 
 
 def to_grid_coord_1d(x, n = 100, box = np.array([-1, 1])*2):
-    # Convert 1D coordinates x to grid indices on a 1D grid of size n, corresponding to box.
+    """Convert 1D coordinates `x` to grid indices on a 1D grid of size `n`, corresponding to `box`.
+
+    """
     grid_coords = np.zeros(x.shape[0], dtype = np.int)
     box_w = box[1] - box[0]
     for p in range(0, x.shape[0]):
@@ -139,8 +183,10 @@ def to_grid_coord_1d(x, n = 100, box = np.array([-1, 1])*2):
     return grid_coords
 
 def prod_to_grid(gamma, mu_spt, nu_spt, n = (20, 20), box = np.array([[-2,-2], [2,2]])):
-    # Discretize a joint distribution gamma on the product space, i.e. supported on mu_spt x nu_spt
-    # onto a grid of n = (n_x, n_y), corresponding to box. 
+    """Discretize a joint distribution gamma on the product space, i.e. supported on `mu_spt x nu_spt`
+        onto a grid of `n = (n_x, n_y)`, corresponding to `box`. 
+    
+    """
     gamma_grid = np.zeros(n)
     mu_spt_gridded = to_grid_coord_1d(mu_spt, n = n[0], box = box[:, 0])
     nu_spt_gridded = to_grid_coord_1d(nu_spt, n = n[1], box = box[:, 1])
@@ -150,4 +196,11 @@ def prod_to_grid(gamma, mu_spt, nu_spt, n = (20, 20), box = np.array([[-2,-2], [
     return gamma_grid
 
 def velocity_from_coupling(gamma, mu_spt, nu_spt, dt):
+    """Estimate velocity field from coupling 
+
+    :param gamma: coupling
+    :param mu_spt: support of source measure
+    :param nu_spt: support of target measure
+    :param dt: time interval 
+    """
     return (gamma @ nu_spt - gamma.sum(1).view(-1, 1) * mu_spt)/dt

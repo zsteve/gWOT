@@ -22,11 +22,11 @@ class OTModel(torch.nn.Module):
     :param lamda: regularisation strength
     :param D: diffusivity 
     :param w: `torch.Tensor` of weights for data-fitting term at each timepoint. 
-            If `None`, then we take `w[i] = N[i]/N.sum()` where `N` is the number of particles at each timepoint.
+            If `None`, then we take :math:`w_i = N_i/\sum_j N_j` where :math:`N_i` is the number of particles at timepoint `i`.
     :param lamda_i: `torch.Tensor` of weights controlling tradeoff of cross-entropy vs OT in data-fitting term
                     at each timepoint
     :param eps: `torch.Tensor` of entropic regularisation parameters to use in the regularising functional.
-            If `None`, then we take `eps[i] = 2*D*dt[i]` (theoretically correct value)
+            If `None`, then we take :math:`\varepsilon_i = 2D\Delta t_i` (theoretically correct value)
     :param eps_df: `torch.Tensor` of entropic regularisation parameters to use in the OT component of the 
             data-fitting functional. 
     :param c_scale: `torch.Tensor` of cost matrix scalings to use in the regularising functional.
@@ -175,7 +175,7 @@ class OTModel(torch.nn.Module):
         return val
     
     def logKexp(self, K, x):
-        """Compute kernel reduction of the form `log(Kexp(x))` 
+        """Compute kernel reduction of the form :math:`\log(K\exp(x))`
         """
         # returns log(K @ exp(x))
         if self.use_keops:
@@ -187,7 +187,7 @@ class OTModel(torch.nn.Module):
             return (K @ (x - scale).exp()).log() + scale
 
     def logsumexp_weight(self, w, x, dim = 1):
-        """Compute kernel reduction of the form `log(w*exp(x))`
+        """Compute kernel reduction of the form :math:`\log(\langle w, \exp(x) \rangle)`
         """
         # returns log(w * exp(x))
         if self.use_keops:
