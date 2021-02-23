@@ -4,7 +4,7 @@ Principled trajectory inference for time-series data with limited samples by opt
 
 *Important: this README is currently under construction. Check back soon!*
 
-[![PyPI version](https://badge.fury.io/py/gwot.svg)](https://badge.fury.io/py/gwot)
+[![PyPI version](https://badge.fury.io/py/gwot.svg)](https://badge.fury.io/py/gwot) [![Documentation Status](https://readthedocs.org/projects/gwot/badge/?version=latest)](https://gwot.readthedocs.io/en/latest/?badge=latest)
 
 ## Introduction
 
