@@ -16,6 +16,35 @@ from gwot.ts import TimeSeries
 from gwot.sim import Simulation
 
 class OTModel(torch.nn.Module):
+    """gWOT model 
+
+    :param ts: TimeSeries containing input data
+    :param lamda: regularisation strength
+    :param D: diffusivity 
+    :param w: `torch.Tensor` of weights for data-fitting term at each timepoint. 
+            If `None`, then we take `w[i] = N[i]/N.sum()` where `N` is the number of particles at each timepoint.
+    :param lamda_i: `torch.Tensor` of weights controlling tradeoff of cross-entropy vs OT in data-fitting term
+                    at each timepoint
+    :param eps: `torch.Tensor` of entropic regularisation parameters to use in the regularising functional.
+            If `None`, then we take `eps[i] = 2*D*dt[i]` (theoretically correct value)
+    :param eps_df: `torch.Tensor` of entropic regularisation parameters to use in the OT component of the 
+            data-fitting functional. 
+    :param c_scale: `torch.Tensor` of cost matrix scalings to use in the regularising functional.
+    :param c_scale_df: `torch.Tensor` of cost matrix scalings to use in the OT component of the 
+            data-fitting functional.
+    :param m_i: `torch.Tensor` of estimates of the total mass at each timepoint
+    :param g_i: `torch.Tensor` of growth rates
+    :param kappa: `torch.Tensor` of weights for use in the case of the soft branching constraint 
+    :param growth_constraint: "exact" for exact branching constraint, and "KL" for soft branching constraint.
+    :param u_hat: `torch.Tensor` of initial values for `u_hat`. If `None`, we initialise with zeros.
+    :param v_hat: `torch.Tensor` of initial values for `v_hat`. If `None`, we initialise with zeros.
+    :param pi_0: `torch.Tensor` of initial distribution to use, 
+            or else a choice of "uniform" (uniform on the space $\overline{\mathcal{X}}$) 
+            or "stationary" (stationary distribution of heat kernel on $\overline{\mathcal{X}}$)
+    :param device: Device to use with PyTorch. 
+    :param use_keops: `True` to use KeOps for on-the-fly kernel reductions. Otherwise all kernels
+            are precomputed and stored in memory. 
+    """
     def __init__(self, ts, 
                  lamda, 
                  D = None, 
@@ -66,6 +95,8 @@ class OTModel(torch.nn.Module):
         self.uv_init(u_hat, v_hat)
 
     def kernel_init(self,):
+        """Initialise kernels for use later
+        """
         def get_pi0_unif(use_keops):
             # not recommended to use this in practice, since the eigengap is generally very small
             if use_keops:
@@ -111,8 +142,13 @@ class OTModel(torch.nn.Module):
             # now construct kernel for data fitting 
             D_ij_df = [C/(self.eps_df[i]*self.c_scale_df[i]) for i in range(0, self.ts.T)]
             self.K_ij_df = [(-D).exp() for D in D_ij_df]
-        
+       
     def uv_init(self, u_hat = None, v_hat = None):
+        """Initialise dual variables 
+        
+        :param u_hat: initial value of `u_hat` to use. If `None`, then initialise with zeros.
+        :param v_hat: initial value of `v_hat` to use. If `None`, then initialise with zeros. 
+        """
         # Initialise model variables (u_hat, v_hat).
         if u_hat is None:
             u_hat = torch.zeros(self.ts.T, self.ts.x.shape[0], device = self.device)
@@ -127,6 +163,11 @@ class OTModel(torch.nn.Module):
         return self.dual_obj()
 
     def Xent_star(self, u, i):
+        """Legendre transform of cross-entropy in its second argument for data-fitting term 
+        
+        :param u: dual variable
+        :param i: timepoint index
+        """
         # Legendre transform of cross-entropy data-fitting term
         val = -torch.sum(torch.log(1 - u[self.t_idx == i]))/torch.sum(self.t_idx == i)
         if torch.isnan(val):
@@ -134,6 +175,8 @@ class OTModel(torch.nn.Module):
         return val
     
     def logKexp(self, K, x):
+        """Compute kernel reduction of the form `log(Kexp(x))` 
+        """
         # returns log(K @ exp(x))
         if self.use_keops:
             if type(x) is not pykeops.torch.LazyTensor:
@@ -144,6 +187,8 @@ class OTModel(torch.nn.Module):
             return (K @ (x - scale).exp()).log() + scale
 
     def logsumexp_weight(self, w, x, dim = 1):
+        """Compute kernel reduction of the form `log(w*exp(x))`
+        """
         # returns log(w * exp(x))
         if self.use_keops:
             if type(x) is not pykeops.torch.LazyTensor:
@@ -155,6 +200,11 @@ class OTModel(torch.nn.Module):
             return torch.log((w * torch.exp(x)).sum())
 
     def compute_phi(self, i = None, out_arr = None):
+        """Compute auxiliary dual variable `phi_i` 
+
+        :param i: index of which `phi` we want to compute. Set to be `None` if we want to compute all.
+        :param out_arr: preallocated `torch.Tensor` in which to output `phi`. 
+        """
         # Compute recurrence for phi. This is used for gradient based methods.
         if i is None:
             # i = None, so we compute phi for all times.
@@ -178,7 +228,9 @@ class OTModel(torch.nn.Module):
         return phi
 
     def dual_obj(self):
-        # Evaluate dual objective
+        """Evaluate dual objective
+
+        """
         u0 = (-self.w[0]*self.dt[0]*self.u_hat[0, :])/self.lamda
         v0 = (-self.m_i[0]/self.m_i[1])*self.dt[0]*self.compute_phi(i = 0)
         # v0_j = LazyTensor(v0.view(1, v0.shape[0], 1))
@@ -198,7 +250,9 @@ class OTModel(torch.nn.Module):
                                        for i in range(0, self.ts.T)]))
 
     def primal_obj(self, terms = False):
-        # Evaluate primal objective
+        """Evaluate primal objective
+
+        """
         # Define first some helper functions
         def eval_primal_OT(model, phi_all):
             u = (-model.w[0]*model.dt[0]/model.lamda)*model.u_hat[0, :]
@@ -266,11 +320,17 @@ class OTModel(torch.nn.Module):
                         (self.w * (1/self.m_i * branches_all + self.lamda_i * Xent_df_all)).sum()
 
     def get_coupling_branch(self, i):
+        """Get the OT coupling for the `i`th data-fitting OT term. 
+
+        """
         # branch (data-fitting) coupling corresponding to time t_i.
         return torch.diag(torch.exp(self.u_hat[i, :]/self.eps_df[i])) @ \
                 (self.K_ij_df[i] @ torch.diag(torch.exp(self.v_hat[i, :]/self.eps_df[i])))
 
     def get_coupling_spine(self, i, K = None):
+        """Get the OT coupling for the `i`th regularisation OT term. 
+
+        """
         # spine (regulariser) coupling corresponding to times (t_i, t_(i+1))
         K = self.K_ij[i] if K is None else K
         if i > 0:
@@ -304,7 +364,9 @@ class OTModel(torch.nn.Module):
                 return (((K @ torch.diag(torch.exp(v0/self.eps[0] - logZ))).T * torch.exp(u0/self.eps[0])).T)
  
     def get_P_mass(self, i = None): 
-        # get total mass of reconstructed marginal at time t_i
+        """Get total mass of reconstructed marginal at timepoint `i`.
+
+        """
         if i is None:
             return torch.stack([self.get_P_mass(i) for i in range(0, self.ts.T)])
         else:
@@ -312,20 +374,25 @@ class OTModel(torch.nn.Module):
                                 (self.K_ij_df[i] @ torch.exp(self.v_hat[i, :]/self.eps_df[i])))
 
     def get_P(self, i = None): 
-        # get reconstructed marginal at time t_i
+        """Get reconstructed marginal at timepoint `i`.
+
+        """
         if i is None:
             return torch.stack([self.get_P(i) for i in range(0, self.ts.T)])
         else:
             return torch.exp(self.u_hat[i, :]/self.eps_df[i]) * (self.K_ij_df[i] @ torch.exp(self.v_hat[i, :]/self.eps_df[i]))
 
     def get_P_hat(self, i = None):
-        # get intermediate marginal at time t_i
+        """Get intermediate marginal (matched to data via cross-entropy) at timepoint `i`.
+        """
         if i is None:
             return torch.stack([self.get_P_hat(i) for i in range(0, self.ts.T)])
         else:
             return torch.exp(self.v_hat[i, :]/self.eps_df[i]) * (self.K_ij_df[i].T @ torch.exp(self.u_hat[i, :]/self.eps_df[i]))
 
     def get_R(self, i = None, phi_all = None):
+        """Get intermediate growth marginal at timepoint `i`.
+        """
         if phi_all is None:
             phi_all = torch.zeros(self.ts.T-1, self.x.shape[0], device = self.device)
             self.compute_phi(out_arr = phi_all) 
@@ -340,6 +407,8 @@ class OTModel(torch.nn.Module):
                     (self.K_ij[i].T @ (p_all[i, :] / (self.K_ij[i] @ torch.exp(v_all[i, :]/self.eps[i]))))
 
     def get_K(self, i):
+        """Get Gibbs kernel for regulariser OT term from timepoint `i` to `i+1`.
+        """
         if self.C is None:
             self.C = sklearn.metrics.pairwise_distances(self.ts.x, metric = 'sqeuclidean')
         K = torch.exp(-torch.from_numpy(self.C).to(self.device)/float(self.c_scale[i]*self.eps[i]))
@@ -349,6 +418,8 @@ class OTModel(torch.nn.Module):
         return K
     
     def get_K_df(self, i):
+        """Get Gibbs kernel for data-fitting OT term from timepoint `i` to `i+1`.
+        """
         if self.C is None:
             self.C = sklearn.metrics.pairwise_distances(self.ts.x, metric = 'sqeuclidean')
         K_df = torch.exp(-torch.from_numpy(self.C).to(self.device)/float(self.c_scale_df[i]*self.eps_df[i]))
@@ -424,7 +495,21 @@ class OTModel(torch.nn.Module):
                         break
         return obj_vals, c
     
-    def solve_lbfgs(self, max_iter = 50, steps = 10, lr = 0.01, max_eval = None, history_size = 100, line_search_fn = 'strong_wolfe', factor = 1, retry_max = 1, tol = 5e-3):
+    def solve_lbfgs(self, max_iter = 50, steps = 10, lr = 0.01, max_eval = None, 
+                    history_size = 100, line_search_fn = 'strong_wolfe', 
+                    factor = 1, retry_max = 1, tol = 5e-3):
+        """Solve using LBFGS
+
+        :param max_iter: max LBFGS iterations per step (passed to `torch.optim.LBFGS`)
+        :param steps: number of steps 
+        :param lr: learning rate (passed to `torch.optim.LBFGS`)
+        :param max_eval: maximum function evals (passed to `torch.optim.LBFGS`)
+        :param history_size: history size (passed to `torch.optim.LBFGS`)
+        :param line_search_fn: line search function to use (passed to `torch.optim.LBFGS`)
+        :param factor: if `NaN` encountered, decrease `lr` by `factor` and retry
+        :param retry_max: maximum number of restarts
+        :param tol: primal-dual tolerance for convergence.
+        """
         # Gradient-based solution with L-BFGS
         obj_vals = []
         optimizer = torch.optim.LBFGS(self.parameters(), lr = lr, 
@@ -477,6 +562,9 @@ class OTModel(torch.nn.Module):
         return obj_vals, u_hat_last, v_hat_last
     
     def interp(self, i, coord_orig = None, P = None, R = None, N = 100, interp_frac = 0.5, method = "geo"):
+        """Compute displacement interpolation at time `(1-interp_frac)*t[i] + interp_frac*t[i+1]`. 
+
+        """
         if any([P is None, R is None]):
             with torch.no_grad():
                 P = self.get_P()

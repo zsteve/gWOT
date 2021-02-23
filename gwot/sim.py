@@ -47,6 +47,11 @@ class Simulation(TimeSeries):
         self.pool = pool
 
     def sample(self, steps_scale = 1, trunc = None):
+        """Sample time-series from Simulation
+
+        :param steps_scale: number of Euler-Maruyama steps to take between timepoints. 
+        :param trunc: if provided, subsample all snapshots to have `trunc` particles. 
+        """
         ic_all = [self.ic_func(self.N[i], self.d) for i in np.arange(0, self.T, 1)]
         def F(i):
             snap, snap_mask = sde_integrate(self.dV, nu = self.D, x0 = ic_all[i],
@@ -70,6 +75,12 @@ class Simulation(TimeSeries):
         return self.snaps
 
     def sample_trajectory(self, steps_scale = 1, N = 1):
+        """Sample trajectory from simulation
+
+        :param steps_scale: number of Euler-Maruyama steps to take between timepoints. 
+        :param N: number of trajectories to sample 
+        :return: `np.array` of dimensions 
+        """
         ic = self.ic_func(N, self.d)
         snap, snap_mask = sde_integrate(self.dV, nu = self.D, x0 = ic,
             b = self.birth, d = self.death, 
