@@ -93,7 +93,7 @@ def empirical_dist(mu_spt, nu_spt, max_iter = 1000000):
     """Compute :math:`W_2` distance between two empirical distributions
 
     :param mu_spt: support of measure :math:`\mu`
-    :param nu_spt: support of measure :math:`\nu`
+    :param nu_spt: support of measure :math:`\\nu`
     :param max_iter: passed to `ot.emd2`
     """
     C = sklearn.metrics.pairwise_distances(mu_spt, nu_spt, metric = 'sqeuclidean')
@@ -103,7 +103,7 @@ def empirical_entropic_coupling(mu_spt, nu_spt, eps, max_iter = 5000, method = "
     """Compute entropy-regularised OT coupling between two empirical distributions
 
     :param mu_spt: support of measure :math:`\mu`
-    :param nu_spt: support of measure :math:`\nu`
+    :param nu_spt: support of measure :math:`\\nu`
     :param eps: regularisation parameter to use 
     :param max_iter: passed to `ot.sinkhorn`
     :param method: passed to `ot.sinkhorn`

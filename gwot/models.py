@@ -187,7 +187,7 @@ class OTModel(torch.nn.Module):
             return (K @ (x - scale).exp()).log() + scale
 
     def logsumexp_weight(self, w, x, dim = 1):
-        """Compute kernel reduction of the form :math:`\log(\langle w, \exp(x) \rangle)`
+        """Compute kernel reduction of the form :math:`\log(\langle w, \exp(x) \\rangle)`
         """
         # returns log(w * exp(x))
         if self.use_keops:
