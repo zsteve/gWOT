@@ -33,6 +33,5 @@ Alternatively, clone this repository and `cd gWOT && pip install .`
 ## Paper
 
 This code accompanies the paper [(arXiv link)](https://arxiv.org/abs/2102.09204)
-```
+
 Lavenant, H., Zhang, S., Kim, Y., & Schiebinger, G. (2021). Towards a mathematical theory of trajectory inference.
-```
