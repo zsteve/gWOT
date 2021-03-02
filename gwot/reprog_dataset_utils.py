@@ -8,7 +8,6 @@ from pathos.multiprocessing import ProcessingPool as Pool
 import copy
 import anndata
 
-
 def get_C_mean(adata_s, t, t_next = None, mode = "tr"):
     if mode == "tr":
         C = sklearn.metrics.pairwise_distances(adata_s.obsm['X_pca'][adata_s.obs.day == t, :], adata_s.obsm['X_pca'][adata_s.obs.day == t_next, :], metric = 'sqeuclidean')

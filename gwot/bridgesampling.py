@@ -1,8 +1,8 @@
 import numpy as np
 
 def sample_brownian_bridge(t0, x0, t1, x1, sigma, N):
-    """Sample Brownian bridge between `(t0, x0)` and `(t1, x1)` with diffusivity `sigma**2`. 
-        Uses a recursive scheme, partitioning the interval `(t0, t1)` into `2**N` steps. 
+    """Sample Brownian bridge between `(t0, x0)` and `(t1, x1)` with diffusivity :math:`\\sigma^2`. 
+        Uses a recursive scheme, partitioning the interval `(t0, t1)` into :math:`2^N` steps. 
     """
     def samp(t0, x0, t1, x1, sigma, t):
         return np.random.normal(x0 + (t - t0)/(t1 - t0)*(x1 - x0), (t1 - t)*(t - t0)/(t1 - t0)*sigma**2 * np.eye(x0.shape[0]))
@@ -24,7 +24,7 @@ def sample_schrodinger_bridge(t0, t1, gamma, mu_spt, nu_spt, sigma, N, M):
     :param gamma: coupling to sample from
     :param mu_spt: support of initial marginal
     :param nu_spt: support of final marginal
-    :param sigma: square root of diffusivity (diffusivity is `sigma**2`)
+    :param sigma: square root of diffusivity (diffusivity is :math:`\\sigma^2`)
     :param N: passed to `sample_brownian_bridge`
     :param M: number of paths to sample 
     """

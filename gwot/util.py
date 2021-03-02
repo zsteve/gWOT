@@ -55,11 +55,6 @@ def sde_integrate(dV, nu, x0, t, steps, birth_death = False, b = None, d = None,
             snap_mask[0] = x_mask
 
     for i in range(0, steps):
-        # for j in range(0, x.shape[0]):
-            # update all existing particles
-            # if x_mask[j]: 
-            #     dV_vec[j, :] = dV(x[j, :], t_current)
-            #     x[j, :] = x[j, :] - dV_vec[j, :]*dt + np.sqrt(nu)*dW(dt, x[j, :].shape)
         dV_vec[x_mask, :] = dV(x[x_mask, :], t_current)
         x[x_mask, :] = x[x_mask, :] - dV_vec[x_mask, :]*dt + np.sqrt(nu)*dW(dt, x[x_mask, :].shape)
 
@@ -90,9 +85,9 @@ def sde_integrate(dV, nu, x0, t, steps, birth_death = False, b = None, d = None,
 # Distances
 
 def empirical_dist(mu_spt, nu_spt, max_iter = 1000000):
-    """Compute :math:`W_2` distance between two empirical distributions
+    """Compute :math:`W_2` distance between two empirical distributions :math:`\\mu, \\nu`.
 
-    :param mu_spt: support of measure :math:`\mu`
+    :param mu_spt: support of measure :math:`\\mu`
     :param nu_spt: support of measure :math:`\\nu`
     :param max_iter: passed to `ot.emd2`
     """
@@ -102,7 +97,7 @@ def empirical_dist(mu_spt, nu_spt, max_iter = 1000000):
 def empirical_entropic_coupling(mu_spt, nu_spt, eps, max_iter = 5000, method = "sinkhorn"):
     """Compute entropy-regularised OT coupling between two empirical distributions
 
-    :param mu_spt: support of measure :math:`\mu`
+    :param mu_spt: support of measure :math:`\\mu`
     :param nu_spt: support of measure :math:`\\nu`
     :param eps: regularisation parameter to use 
     :param max_iter: passed to `ot.sinkhorn`
@@ -116,7 +111,7 @@ def empirical_entropic_coupling(mu_spt, nu_spt, eps, max_iter = 5000, method = "
 def ker_smooth(m, h):
     """Kernel smoothing in time domain 
     
-    :param m: OTModel
+    :param m: OTModel object
     :param h: bandwidth of kernel-in-time
     """
     w_smoothed = torch.zeros(m.ts.T, m.x.shape[0])
@@ -125,7 +120,6 @@ def ker_smooth(m, h):
     for i in range(0, m.ts.T):
         for j in range(0, m.ts.T):
             w_smoothed[i, m.t_idx == j] = k(t_map[j] - t_map[i])
-
     w_smoothed = ((w_smoothed.T/w_smoothed.sum(dim = 1)).T)
     return w_smoothed
 
