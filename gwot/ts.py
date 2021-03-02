@@ -1,7 +1,7 @@
 import numpy as np
 
 class TimeSeries():
-    """Base class for time-series dataset
+    """Base class for time-series dataset.
     
     :param x: `np.array` of observed datapoints. 
     :param dt: `np.array` of time increments `t[i+1] - t[i]`.
