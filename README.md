@@ -27,8 +27,11 @@ To install, use `pip install gwot`.
 
 Alternatively, clone this repository and `cd gWOT && pip install .`
 
-## Example application: bistable landscape with branching
+## Example application 1: bistable landscape with branching
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zsteve/gWOT/blob/main/examples/gWOT_example.ipynb)
+
+## Example application 2: reprogramming dataset (Schiebinger et al., 2019) 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zsteve/gWOT/blob/main/examples/reprogramming.ipynb)
 
 ## Paper
 

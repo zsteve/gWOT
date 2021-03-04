@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="gwot", # Replace with your own username
-    version="0.0.11",
+    version="0.0.12",
     author="Stephen Zhang",
     author_email="syz@math.ubc.ca",
     description="gWOT",
