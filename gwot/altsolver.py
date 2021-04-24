@@ -18,8 +18,8 @@ def solve_adam(self, steps = 250, print_steps = 10, lr = 0.001, factor = 1, retr
             optimizer.zero_grad()
             obj = self.dual_obj()
             obj.backward()
-            for j in range(0, self.sim.T):
-                self.v_hat.grad[j, self.time_idx != j] = 0
+            for j in range(0, self.ts.T):
+                self.v_hat.grad[j, self.t_idx != j] = 0
             return obj
         ## 
         if i % print_steps == 0:
