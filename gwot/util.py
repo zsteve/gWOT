@@ -18,7 +18,7 @@ def dW(dt, sz):
     """
     return np.sqrt(dt)*np.random.standard_normal(sz)
 
-def sde_integrate(dV, nu, x0, t, steps, birth_death = False, b = None, d = None, g_max = 50, snaps = None):
+def sde_integrate(dV, nu, x0, t, steps, birth_death = False, b = None, d = None, g_max = 250, snaps = None):
     """Integrate SDE using Euler-Maruyama method (with birth-death)
     
     :param dV: function `dV(x, t)` specifying the drift field
