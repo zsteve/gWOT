@@ -9,7 +9,6 @@ import ot
 import os
 import dill
 from scipy.sparse.linalg import aslinearoperator, eigs, LinearOperator
-from scipy import matrix
 
 from gwot.lambertw import lambertw
 from gwot.ts import TimeSeries
@@ -135,10 +134,11 @@ class OTModel(torch.nn.Module):
                 eigvals, eigvecs = eigs(K_op, k = 1)
                 self.pi_0 = torch.from_numpy(eigvecs.real/eigvecs.real.sum()).to(self.device)
             else:
-                K_op = aslinearoperator(matrix(K).T)
-                self.K_op = K_op
-                eigvals, eigvecs = eigs(K_op, k = 1)
-                self.pi_0 = torch.from_numpy(eigvecs.real/eigvecs.real.sum()).to(self.device)
+                # K_op = aslinearoperator(np.asarray(K).T)
+                # self.K_op = K_op
+                # eigvals, eigvecs = eigs(K_op, k = 1)
+                # self.pi_0 = torch.from_numpy(eigvecs.real/eigvecs.real.sum()).to(self.device)
+                raise NotImplementedError()
         if self.use_keops:
             # construct LazyTensor kernel for reg functional
             x_i = LazyTensor(self.x.view(1, self.x.shape[0], self.x.shape[1]))
