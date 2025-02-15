@@ -1,8 +1,7 @@
 import numpy as np
 import torch
 from torch.autograd import grad, Variable
-import pykeops
-from pykeops.torch import LazyTensor, Vi, Vj
+from pykeops.torch import LazyTensor
 import math
 import sklearn
 import ot
@@ -24,7 +23,7 @@ class OTModel(torch.nn.Module):
     where :math:`\\mathbf{R}_{t_1}, \ldots, \\mathbf{R}_{t_T}` are the reconstructed marginals
     at times :math:`t_1, \ldots, t_T`. 
 
-    :param ts: TimeSeries object containing input data.
+    :param ts: TimeSeries object containing input data :math:`x`.
     :param lamda_reg: regularisation strength parameter :math:`\\lambda`.
     :param D: diffusivity :math:`D`.
     :param w: `torch.Tensor` of weights for data-fitting term at each timepoint. 
@@ -77,7 +76,7 @@ class OTModel(torch.nn.Module):
                  pi_0 = 'stationary',
                  device = None,
                  use_keops = True):
-        super(OTModel, self).__init__()
+        super().__init__()
         # if no device specified, use CPU
         self.device = torch.device("cpu") if device is None else device
         self.use_keops = use_keops
@@ -88,10 +87,10 @@ class OTModel(torch.nn.Module):
         self.lamda_reg = lamda_reg
         self.D = ts.D if D is None else D
         self.t_idx = torch.from_numpy(ts.t_idx).to(self.device)
-        self.dt = torch.from_numpy(ts.dt).to(self.device)
-        self.eps = torch.from_numpy(2*self.D*ts.dt).to(self.device) if eps is None else eps
+        self.dt = torch.tensor(ts.dt,dtype=torch.get_default_dtype()).to(self.device)
+        self.eps = torch.tensor(2*self.D*ts.dt,dtype=torch.get_default_dtype()).to(self.device) if eps is None else eps
         self.eps_df = eps_df
-        self.x = torch.from_numpy(ts.x).to(self.device)
+        self.x = torch.tensor(ts.x,dtype=torch.get_default_dtype()).to(self.device)
         self.c_scale = torch.ones(ts.T, device = self.device) if c_scale is None else c_scale
         self.c_scale_df = torch.ones(ts.T, device = self.device) if c_scale_df is None else c_scale_df
         self.C = None
@@ -157,15 +156,13 @@ class OTModel(torch.nn.Module):
             # do not use keops
             C = torch.from_numpy(sklearn.metrics.pairwise_distances(self.x.cpu(), metric = "sqeuclidean")).to(self.device)
             # construct kernel for reg functional
-            D_ij = [C/(self.eps[i]*self.c_scale[i]) for i in range(0, self.ts.T-1)]
-            Z_ij = [(-D).exp() for D in D_ij]
+            Z_ij = [(-C/(self.eps[i]*self.c_scale[i])).exp() for i in range(0, self.ts.T-1)]
             self.K_ij = [(M.T/M.sum(dim = 1)).T for M in Z_ij]
             if self.pi_0 is None:
                 get_pi0_unif(self.K_ij[0].cpu())
             self.K_ij[0] = self.pi_0.reshape(-1, 1) * self.K_ij[0]
             # now construct kernel for data fitting 
-            D_ij_df = [C/(self.eps_df[i]*self.c_scale_df[i]) for i in range(0, self.ts.T)]
-            self.K_ij_df = [(-D).exp() for D in D_ij_df]
+            self.K_ij_df = [(-C/(self.eps_df[i]*self.c_scale_df[i])).exp() for i in range(0, self.ts.T)]
        
     def uv_init(self, u_hat = None, v_hat = None):
         """Initialise dual variables :math:`\\{\\hat{u}_i, \\hat{v}_i\\}_i` for model. 
@@ -202,7 +199,7 @@ class OTModel(torch.nn.Module):
         """Compute kernel reduction of the form :math:`\\log(K\\exp(x))`
         """
         if self.use_keops:
-            if type(x) is not pykeops.torch.LazyTensor:
+            if type(x) is not LazyTensor:
                 x = LazyTensor(x.view(1, -1, 1))
             return x.logsumexp(dim = 1, weight = K).view(-1)
         else:
@@ -213,9 +210,9 @@ class OTModel(torch.nn.Module):
         """Compute kernel reduction of the form :math:`\\log(\\langle w, \\exp(x) \\rangle)`
         """
         if self.use_keops:
-            if type(x) is not pykeops.torch.LazyTensor:
+            if type(x) is not LazyTensor:
                 x = LazyTensor(x)
-            if type(w) is not pykeops.torch.LazyTensor:
+            if type(w) is not LazyTensor:
                 w = LazyTensor(w)
             return x.logsumexp(weight = w, dim = dim).view(-1)
         else:
@@ -293,7 +290,7 @@ class OTModel(torch.nn.Module):
             v = model.v_hat[i, :]
             return torch.dot(u * torch.exp(u/model.eps_df[i]), model.K_ij_df[i] @ torch.exp(v/model.eps_df[i])) +  \
                     torch.dot(v * torch.exp(v/model.eps_df[i]), model.K_ij_df[i].T @ torch.exp(u/model.eps_df[i])) -  \
-                    model.eps_df[i] * torch.exp(u/model.eps_df[i]).T @ (model.K_ij_df[i] @ torch.exp(v/model.eps_df[i]))
+                    model.eps_df[i] * torch.exp(u/model.eps_df[i]) @ (model.K_ij_df[i] @ torch.exp(v/model.eps_df[i]))
         def KL(alpha, beta):
             return (alpha*(torch.log(alpha/beta)) - alpha + beta).sum()
         def eval_primal_crossent_df(model, i):
@@ -357,7 +354,7 @@ class OTModel(torch.nn.Module):
             g = v/self.eps[i]
             x = self.logKexp(self.K_ij[i], g.view(1, -1, 1)).view(-1)
             alpha = self.get_R(i)
-            if type(K) is pykeops.torch.LazyTensor:
+            if type(K) is LazyTensor:
                 return LazyTensor(alpha.view(-1, 1), axis = 0) * K * \
                         (LazyTensor(g.view(1, -1, 1)) - LazyTensor(x.view(-1, 1, 1))).exp()
             else:
@@ -367,12 +364,14 @@ class OTModel(torch.nn.Module):
             v0 = (-self.m[0]/self.m[1])*self.dt[0]*self.compute_phi(i = 0)
             x = self.logKexp(self.K_ij[0], (v0/self.eps[0]).view(1, -1, 1))
             logZ = self.logsumexp_weight(torch.exp(u0/self.eps[0]).view(-1, 1, 1), x.view(-1, 1, 1), dim = 0).item()
-            if type(K) is pykeops.torch.LazyTensor:
+            if type(K) is LazyTensor:
                 return LazyTensor((u0/self.eps[0]).view(-1, 1, 1)).exp() * K * \
                         (LazyTensor((v0/self.eps[0]).view(1, -1, 1)) - logZ).exp()
             else:
                 return (((K @ torch.diag(torch.exp(v0/self.eps[0] - logZ))).T * torch.exp(u0/self.eps[0])).T)
- 
+        else:
+            raise ValueError("Index i must be a non-negative integer")
+
     def get_R(self, i = None): 
         """Get reconstructed marginal :math:`\\mathbf{R}_{t_i}` at timepoint `i`.
         
@@ -448,7 +447,7 @@ class OTModel(torch.nn.Module):
         if self.use_keops and precompute_K:
             K_prec = [self.get_K(i) for i in range(self.ts.T-1)]
             K_df_prec = [self.get_K_df(i) for i in range(self.ts.T)]
-        elif ~self.use_keops and precompute_K:
+        elif not self.use_keops and precompute_K:
             # ignore precompute if not using Keops
             precompute_K = False
         c = 0 # mass constraint dual variable
@@ -652,7 +651,7 @@ class OTModel_kl(OTModel):
                  u0 = None, pi_0 = None,
                  device = None,
                  use_keops = True):
-        super(OTModel_kl, self).__init__(ts, lamda_reg, D = D, w = w, eps = eps, eps_df = torch.ones(ts.T, device = device), 
+        super().__init__(ts, lamda_reg, D = D, w = w, eps = eps, eps_df = torch.ones(ts.T, device = device), 
                                         c_scale = c_scale, c_scale_df = torch.ones(ts.T, device = device), pi_0 = pi_0, 
                                         device = device, use_keops = use_keops)
         # initialise model params, with defaults if None. 
@@ -818,10 +817,11 @@ class OTModel_kl(OTModel):
             optimizer.step(closure = closure)
         self.u_init(u_last.clone())
         return obj_vals, u_last
-    
+
+
 class OTModel_ot(OTModel):
     def __init__(self, *args, **kwargs):
-        super(OTModel_ot, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def crossent_star(self, u, i):
         # Hack for OT-only data fitting (i.e. F(a, b) = indicator(a = b))
