@@ -42,7 +42,8 @@ class OTModel(torch.nn.Module):
             data-fitting functional. Defined in the same way as `c_scale`. 
     :param m: `torch.Tensor` of estimates of the total mass :math:`m_i` at each timepoint :math:`t_i`.
     :param g: `torch.Tensor` of growth rates, where :math:`g_{ij}` denotes the growth rate at 
-            time :math:`t_i` and spatial location :math:`x_j`.
+            time :math:`t_i` and spatial location :math:`x_j`. A time-independent 1-dim `torch.Tensor`
+            giving growth rates at each spatial location is also accepted. If `None`, we initialise with ones.
     :param kappa: (Only used for soft branching constraint) `torch.Tensor` of penalty weights :math:`\\kappa_i` 
             corresponding :math:`G_{i}(\\overline{\\mathbf{R}}_{t_i}, \\mathbf{R}_{t_i})`.
     :param growth_constraint: "exact" for exact branching constraint, and "KL" for soft branching constraint.
@@ -97,6 +98,10 @@ class OTModel(torch.nn.Module):
         # parameters related to growth
         self.m = torch.ones(ts.T, device = self.device) if m is None else m 
         self.g = torch.ones(ts.T, self.x.shape[0], device = self.device) if g is None else g 
+        if len(self.g.squeeze()) == self.x.shape[0]:
+            self.g = self.g.squeeze()*torch.ones((self.ts.T,1))
+        elif not isinstance(self.g, torch.Tensor) or not self.g.shape == (ts.T,self.x.shape[0]):
+            raise ValueError("g must be a `torch.Tensor` of shape (ts.T,ts.x.shape[0]), or of length ts.x.shape[0], or None.")
         self.kappa = kappa 
         if growth_constraint not in ["exact", "KL"]:
             raise ValueError("growth_constraint must be one of 'exact' or 'KL'")
