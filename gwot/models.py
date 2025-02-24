@@ -180,10 +180,14 @@ class OTModel(torch.nn.Module):
         if v_hat is None:
             v_hat = torch.zeros(self.ts.T, self.ts.x.shape[0], device = self.device)
         for i in range(0, self.ts.T):
-            v_hat[i, i != self.ts.t_idx] = -self.lamda[i]
+            v_hat[i, ~self.i_indicator(i)] = -self.lamda[i]
         self.register_parameter(name = 'u_hat', param = torch.nn.Parameter(Variable(u_hat, requires_grad = True)))
         self.register_parameter(name = 'v_hat', param = torch.nn.Parameter(Variable(v_hat, requires_grad = True)))
-        
+
+    def i_indicator(self,i):
+        """Return the indicator function (bool vector) for timepoint i in the support"""
+        return self.t_idx == i
+
     def forward(self):
         return self.dual_obj()
 
@@ -195,7 +199,7 @@ class OTModel(torch.nn.Module):
         :param u: dual variable
         :param i: timepoint index
         """
-        val = -torch.sum(torch.log(1 - u[self.t_idx == i]))/torch.sum(self.t_idx == i)
+        val = -torch.sum(torch.log(1 - u[self.i_indicator(i)]))/self.ts.N[i]
         if torch.isnan(val): 
             val = torch.tensor(float("Inf"), device = self.device)
         return val
@@ -300,8 +304,8 @@ class OTModel(torch.nn.Module):
             return (alpha*(torch.log(alpha/beta)) - alpha + beta).sum()
         def eval_primal_crossent_df(model, i):
             p_hat = model.get_R_hat(i)
-            N = 1.0*(model.t_idx == i).sum()
-            return ((1/N)*(-torch.log(p_hat[model.t_idx == i]/model.m[i]) - torch.log(N))).sum() - 1 + \
+            N = torch.tensor(1.0*model.ts.N[i])
+            return ((1/N)*(-torch.log(p_hat[model.i_indicator(i)]/model.m[i]) - torch.log(N))).sum() - 1 + \
                         p_hat.sum()/model.m[i]
         def eval_primal_growth_KL(model, i, R):
             r = R[i, :]
@@ -500,7 +504,7 @@ class OTModel(torch.nn.Module):
                     self.v_hat[j, :] = self.eps_df[j]*lambertw((self.lamda[j]/self.eps_df[j]) * \
                                                                 (1.0/(1.0*torch.sum(self.t_idx == j))) * \
                                                                 1/(K_df(j).T @ torch.exp(self.u_hat[j]/self.eps_df[j])))
-                    self.v_hat[j, self.t_idx != j] = 0
+                    self.v_hat[j, ~self.i_indicator(j)] = 0
                 c = self.lamda_reg*self.D*torch.log(torch.sum(torch.exp((-self.w[0]*self.u_hat[0, :])/(self.lamda_reg*self.D)) * z1(0, c) * z2(0, c)))
                 if i % print_interval == 0:
                     with torch.no_grad():
@@ -675,14 +679,14 @@ class OTModel_kl(OTModel):
         else:
             u = u0
         for i in range(0, self.ts.T):
-            u[i, i != self.ts.t_idx] = -self.w[i]/(self.lamda_reg*self.D) # 0
+            u[i, ~self.i_indicator(i)] = -self.w[i]/(self.lamda_reg*self.D) # 0
         self.register_parameter(name = 'u', param = torch.nn.Parameter(Variable(u, requires_grad = True)))
         
     def F_star(self, u, i):
         """Legendre dual :math:`u \\mapsto F^*(u)` of cross-entropy data-fitting term
         :math:`x \mapsto -\sum_{k \\in \\mathrm{supp}(\\hat{\\rho}_{t_i})} \\log(x_k)`
         """
-        val = (-torch.sum(self.t_idx == i) - torch.sum(torch.log(-u[self.t_idx == i])))/torch.sum(self.t_idx == i)
+        val = (-self.ts.N[i] - torch.sum(torch.log(-u[self.i_indicator(i)])))/self.ts.N[i]
         if torch.isnan(val):
             val = torch.tensor(float("Inf"), device = self.device)
         return val
@@ -755,7 +759,7 @@ class OTModel_kl(OTModel):
             return x/x.sum()
         with torch.no_grad():
             p_all = self.get_R()
-        return self.lamda_reg*self.D*reg() + torch.dot(self.w, torch.stack([xent(normalise((self.t_idx == i)*1.0), p_all[i, :]) for i in range(self.ts.T)]))
+        return self.lamda_reg*self.D*reg() + torch.dot(self.w, torch.stack([xent(normalise((self.i_indicator(i))*1.0), p_all[i, :]) for i in range(self.ts.T)]))
 
     def get_gamma_branch(self, i):
         pass
@@ -796,7 +800,7 @@ class OTModel_kl(OTModel):
                 obj = self.dual_obj()
                 obj.backward()
                 for j in range(0, self.ts.T):
-                    self.u.grad[j, self.t_idx != j] = 0
+                    self.u.grad[j,~self.i_indicator(j)] = 0
                 return obj
             ## 
             with torch.no_grad():
@@ -830,7 +834,7 @@ class OTModel_ot(OTModel):
 
     def crossent_star(self, u, i):
         # Hack for OT-only data fitting (i.e. F(a, b) = indicator(a = b))
-        p = (1.0*(self.t_idx == i))
+        p = (1.0*(self.i_indicator(i)))
         p = p/p.sum()
         return torch.sum(p * u)
     
