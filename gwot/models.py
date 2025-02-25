@@ -7,6 +7,7 @@ import sklearn
 import ot
 import os
 import dill
+import scipy.sparse
 from scipy.sparse.linalg import aslinearoperator, eigs, LinearOperator
 
 from gwot.lambertw import lambertw
@@ -183,10 +184,50 @@ class OTModel(torch.nn.Module):
             v_hat[i, ~self.i_indicator(i)] = -self.lamda[i]
         self.register_parameter(name = 'u_hat', param = torch.nn.Parameter(Variable(u_hat, requires_grad = True)))
         self.register_parameter(name = 'v_hat', param = torch.nn.Parameter(Variable(v_hat, requires_grad = True)))
+        
+    ###############################
+    # Accessor, setter and getter methods, to abstract the storage of these variables
+    # These were added to avoid copy-pasting code for OTModel_SW.
+    # 
+    def u_hat_at(self,i):
+        """Access i-th element of u_hat"""
+        return self.u_hat[i]
+
+    def v_hat_at(self,i):
+        """Access i-th element of v_hat"""
+        return self.v_hat[i]
+    
+    def u_hat_set(self,i,vec):
+        """Set i-th element of u_hat as vec"""
+        self.u_hat[i] = vec
+
+    def v_hat_set(self,i,vec):
+        """Set i-th element of v_hat as vec"""
+        self.v_hat[i] = vec
+
+    def clean_v_hat_grad(self):
+        """Set to zero the grad values that are outside of each timepoint's unique support."""
+        for i in range(0, self.ts.T):
+            self.v_hat.grad[i, ~self.i_indicator(i)] = 0
+ 
+    def R_container(self, R):
+        """Put the list of R marginals into a container"""
+        return torch.stack(R)
 
     def i_indicator(self,i):
         """Return the indicator function (bool vector) for timepoint i in the support"""
         return self.t_idx == i
+
+    def initialize_phi(self):
+        """Initialize the container for values of intermediate variable :math:`\\phi`"""
+        return torch.zeros(self.ts.T-1, self.x.shape[0], device = self.device)
+
+    def get_g(self,i,supp_j=None):
+        """Return values of g at timepoint i, on the support of timepoint supp_j.
+        It's simple in this case since all variables have the same support at each timepoint.
+        """
+        return self.g[i]
+    ##############################
 
     def forward(self):
         return self.dual_obj()
@@ -241,37 +282,37 @@ class OTModel(torch.nn.Module):
             self.compute_phi(i = 0, out_arr = out_arr)
             return None
         elif i == self.ts.T-2:
-            psi_next = (-self.w[i+1]*self.u_hat[i+1, :])/self.lamda_reg
+            psi_next = (-self.w[i+1]*self.u_hat_at(i+1))/self.lamda_reg
         else:
             phi_next = self.compute_phi(i = i+1, out_arr = out_arr)
             v_next = (-self.m[i+1]/self.m[i+2])*self.dt[i+1]*phi_next
             u_next = (-self.eps[i+1])*self.logKexp(self.K_ij[i+1], v_next/self.eps[i+1]).view(-1)
-            psi_next = (-1/self.lamda_reg)*(self.lamda_reg*u_next/self.dt[i+1] + self.w[i+1]*self.u_hat[i+1, :])
+            psi_next = (-1/self.lamda_reg)*(self.lamda_reg*u_next/self.dt[i+1] + self.w[i+1]*self.u_hat_at(i+1))
         if self.growth_constraint == "KL":
-            phi = self.kappa[i]*self.g[i, :]*(1 - torch.exp(psi_next/self.kappa[i]))
+            phi = self.kappa[i]*self.get_g(i,i+1)*(1 - torch.exp(psi_next/self.kappa[i]))
         elif self.growth_constraint == "exact":
-            phi = -self.g[i, :]*psi_next
+            phi = -self.get_g(i,i+1)*psi_next
         else:
             raise Exception("growth_constraint not 'KL' or 'exact'")
         if out_arr is not None:
-            out_arr[i, :] = phi
+            out_arr[i] = phi
         return phi
 
     def dual_obj(self):
         """Evaluate dual objective (see Eq. 3.16 in manuscript)
 
         """
-        u0 = (-self.w[0]*self.dt[0]*self.u_hat[0, :])/self.lamda_reg
+        u0 = (-self.w[0]*self.dt[0]*self.u_hat_at(0))/self.lamda_reg
         v0 = (-self.m[0]/self.m[1])*self.dt[0]*self.compute_phi(i = 0)
         w = self.logKexp(self.K_ij[0], v0/self.eps[0])
         reg = self.eps[0]*self.logsumexp_weight((u0/self.eps[0]).exp().view(1, -1, 1), w.view(1, -1, 1), dim = 1)
         return (self.lamda_reg/(self.m[0]*self.dt[0]))*reg + \
                 torch.dot(self.w/self.m, 
-                        torch.stack([self.eps_df[i] * torch.dot(torch.exp(self.u_hat[i, :]/self.eps_df[i]), 
-                                                                self.K_ij_df[i] @ torch.exp(self.v_hat[i, :]/self.eps_df[i])) 
+                        torch.stack([self.eps_df[i] * torch.dot(torch.exp(self.u_hat_at(i)/self.eps_df[i]), 
+                                                                self.K_ij_df[i] @ torch.exp(self.v_hat_at(i)/self.eps_df[i])) 
                                     for i in range(0, self.ts.T)])) + \
                 torch.dot(self.lamda * self.w, 
-                          torch.stack([self.crossent_star(-self.v_hat[i, :]/self.lamda[i], i) 
+                          torch.stack([self.crossent_star(-self.v_hat_at(i)/self.lamda[i], i) 
                                        for i in range(0, self.ts.T)]))
 
     def primal_obj(self, terms = False):
@@ -280,8 +321,8 @@ class OTModel(torch.nn.Module):
         """
         # Define first some helper functions. 
         def eval_primal_OT(model, phi_all):
-            u = (-model.w[0]*model.dt[0]/model.lamda_reg)*model.u_hat[0, :]
-            v = (-model.m[0]/model.m[1])*model.dt[0]*phi_all[0, :].to(self.device)
+            u = (-model.w[0]*model.dt[0]/model.lamda_reg)*model.u_hat_at(0)
+            v = (-model.m[0]/model.m[1])*model.dt[0]*phi_all[0].to(self.device)
             Z = self.logsumexp_weight((model.K_ij[0] @ (v/self.eps[0]).exp()).view(-1, 1, 1), 
                                         (u/model.eps[0]).view(-1, 1, 1), dim = 0).item()
             return torch.dot(u*torch.exp(u/self.eps[0] - Z), model.K_ij[0] @ (v/self.eps[0]).exp()) + \
@@ -289,14 +330,14 @@ class OTModel(torch.nn.Module):
                     self.eps[0]*Z
         def eval_primal_OT_tilde(model, i, phi_all):
             p = model.get_R(i)
-            v = (-model.m[i]/model.m[i+1])*model.dt[i]*phi_all[i, :].to(self.device)
+            v = (-model.m[i]/model.m[i+1])*model.dt[i]*phi_all[i].to(self.device)
             u = -self.eps[i]*torch.log(model.K_ij[i] @ torch.exp(v/self.eps[i]))
             alpha = p 
             beta = (v/self.eps[i]).exp() * (model.K_ij[i].T @ (alpha/(model.K_ij[i] @ (v/self.eps[i]).exp())))
             return torch.dot(alpha, u) + torch.dot(beta, v)
         def eval_primal_OT_df(model, i):
-            u = model.u_hat[i, :]
-            v = model.v_hat[i, :]
+            u = model.u_hat_at(i)
+            v = model.v_hat_at(i)
             return torch.dot(u * torch.exp(u/model.eps_df[i]), model.K_ij_df[i] @ torch.exp(v/model.eps_df[i])) +  \
                     torch.dot(v * torch.exp(v/model.eps_df[i]), model.K_ij_df[i].T @ torch.exp(u/model.eps_df[i])) -  \
                     model.eps_df[i] * torch.exp(u/model.eps_df[i]) @ (model.K_ij_df[i] @ torch.exp(v/model.eps_df[i]))
@@ -307,17 +348,17 @@ class OTModel(torch.nn.Module):
             N = torch.tensor(1.0*model.ts.N[i])
             return ((1/N)*(-torch.log(p_hat[model.i_indicator(i)]/model.m[i]) - torch.log(N))).sum() - 1 + \
                         p_hat.sum()/model.m[i]
-        def eval_primal_growth_KL(model, i, R):
-            r = R[i, :]
-            p = model.get_R(i+1)
-            return model.kappa[i]*KL(p, model.g[i, :]*r)
+        def eval_primal_growth_KL(model, i, R_bar):
+            r = R_bar[i-1]  # R_bar's first value is for the second timepoint
+            p = model.get_R(i)
+            return model.kappa[i-1]*KL(p, model.get_g(i)*r)
         # precompute all phi values for efficiency
-        phi_all = torch.zeros(self.ts.T-1, self.x.shape[0], device = self.device)
+        phi_all = self.initialize_phi()
         self.compute_phi(out_arr = phi_all)
         crossent_df_all = torch.stack([eval_primal_crossent_df(self, i) for i in range(0, self.ts.T)])
         if self.growth_constraint == 'KL':
-            R_all = self.get_R_bar(phi_all = phi_all)
-            growth = torch.stack([eval_primal_growth_KL(self, i, R_all) for i in range(0, self.ts.T-1)])
+            R_bar = self.get_R_bar(phi_all = phi_all)
+            growth = torch.stack([eval_primal_growth_KL(self, i, R_bar) for i in range(1, self.ts.T)])
         spine_all = torch.stack([eval_primal_OT(self, phi_all)] + \
                             [eval_primal_OT_tilde(self, i, phi_all) for i in range(1, self.ts.T - 1)])
         branches_all = torch.stack([eval_primal_OT_df(self, i) for i in range(0, self.ts.T)])
@@ -347,8 +388,8 @@ class OTModel(torch.nn.Module):
             
         :return: :math:`\\gamma` as a `torch.Tensor`.
         """
-        return torch.diag(torch.exp(self.u_hat[i, :]/self.eps_df[i])) @ \
-                (self.K_ij_df[i] @ torch.diag(torch.exp(self.v_hat[i, :]/self.eps_df[i])))
+        return torch.diag(torch.exp(self.u_hat_at(i)/self.eps_df[i])) @ \
+                (self.K_ij_df[i] @ torch.diag(torch.exp(self.v_hat_at(i)/self.eps_df[i])))
 
     def get_coupling_reg(self, i, K = None):
         """Get the OT coupling :math:`\\gamma` for the `i`th regularisation OT term
@@ -369,7 +410,7 @@ class OTModel(torch.nn.Module):
             else:
                 return alpha.view(-1, 1) * K * (g.view(1, -1) - x.view(-1, 1)).exp()
         elif i == 0:
-            u0 = (-self.w[0]*self.dt[0]*self.u_hat[0, :])/(self.lamda_reg)
+            u0 = (-self.w[0]*self.dt[0]*self.u_hat_at(0))/(self.lamda_reg)
             v0 = (-self.m[0]/self.m[1])*self.dt[0]*self.compute_phi(i = 0)
             x = self.logKexp(self.K_ij[0], (v0/self.eps[0]).view(1, -1, 1))
             logZ = self.logsumexp_weight(torch.exp(u0/self.eps[0]).view(-1, 1, 1), x.view(-1, 1, 1), dim = 0).item()
@@ -386,35 +427,35 @@ class OTModel(torch.nn.Module):
         
         """
         if i is None:
-            return torch.stack([self.get_R(i) for i in range(0, self.ts.T)])
+            return self.R_container([self.get_R(i) for i in range(0, self.ts.T)])
         else:
-            return torch.exp(self.u_hat[i, :]/self.eps_df[i]) * (self.K_ij_df[i] @ torch.exp(self.v_hat[i, :]/self.eps_df[i]))
+            return torch.exp(self.u_hat_at(i)/self.eps_df[i]) * (self.K_ij_df[i] @ torch.exp(self.v_hat_at(i)/self.eps_df[i]))
 
     def get_R_hat(self, i = None):
         """Get intermediate marginal :math:`\\mathbf{\\hat{R}}_{t_i}` at timepoint `i`.
         
         """
         if i is None:
-            return torch.stack([self.get_R_hat(i) for i in range(0, self.ts.T)])
+            return self.R_container([self.get_R_hat(i) for i in range(0, self.ts.T)])
         else:
-            return torch.exp(self.v_hat[i, :]/self.eps_df[i]) * (self.K_ij_df[i].T @ torch.exp(self.u_hat[i, :]/self.eps_df[i]))
+            return torch.exp(self.v_hat_at(i)/self.eps_df[i]) * (self.K_ij_df[i].T @ torch.exp(self.u_hat_at(i)/self.eps_df[i]))
 
     def get_R_bar(self, i = None, phi_all = None):
         """Get intermediate growth marginal :math:`\\mathbf{\\overline{R}}_{t_i}` at timepoint `i`.
         
         """
         if phi_all is None:
-            phi_all = torch.zeros(self.ts.T-1, self.x.shape[0], device = self.device)
+            phi_all = self.initialize_phi()
             self.compute_phi(out_arr = phi_all) 
-        v_all = (phi_all.T * ((-self.m[0:-1]/self.m[1:])*self.dt)).T
+        v_all = [phi_all[i]*(-self.m[i]/self.m[i+1]*self.dt[i]) for i in range(len(phi_all))]
         p_all = self.get_R()
         if i is None:
-            return torch.stack([(torch.exp(v_all[i, :]/self.eps[i])) * \
-                                (self.K_ij[i].T @ (p_all[i, :] / (self.K_ij[i] @ torch.exp(v_all[i, :]/self.eps[i])))) \
+            return self.R_container([(torch.exp(v_all[i]/self.eps[i])) * \
+                                (self.K_ij[i].T @ (p_all[i] / (self.K_ij[i] @ torch.exp(v_all[i]/self.eps[i])))) \
                             for i in range(0, self.ts.T-1)])
         else:
-            return (torch.exp(v_all[i, :]/self.eps[i])) * \
-                    (self.K_ij[i].T @ (p_all[i, :] / (self.K_ij[i] @ torch.exp(v_all[i, :]/self.eps[i]))))
+            return (torch.exp(v_all[i]/self.eps[i])) * \
+                    (self.K_ij[i].T @ (p_all[i] / (self.K_ij[i] @ torch.exp(v_all[i]/self.eps[i]))))
 
     def get_K(self, i):
         """Get Gibbs kernel as a `torch.Tensor` for regulariser OT term from timepoint `i` to `i+1`. 
@@ -461,7 +502,7 @@ class OTModel(torch.nn.Module):
             precompute_K = False
         c = 0 # mass constraint dual variable
         def U(i, c):
-            return (-float(i == 0)*c - self.w[i]*self.u_hat[i, :])/(self.lamda_reg*self.D)
+            return (-float(i == 0)*c - self.w[i]*self.u_hat_at(i))/(self.lamda_reg*self.D)
         def z1(i, c):
             if i == 0:
                 p = torch.ones(self.u_hat.shape[1], device = self.device)
@@ -490,22 +531,22 @@ class OTModel(torch.nn.Module):
                 return self.K_ij_df[i]
 
         obj_vals = []
-        # initialise as ones 
-        self.u_hat[:, :] = 0
-        self.v_hat[:, :] = 0
+        # initialise as zeros
+        self.u_hat = torch.zeros_like(self.u_hat)
+        self.v_hat = torch.zeros_like(self.v_hat)
         with torch.no_grad():
             for i in range(steps):
                 # update u_hat
                 for j in range(self.ts.T):
-                    self.u_hat[j, :] = 1/(1/self.eps_df[j] + self.w[j]/(self.lamda_reg*self.D)) * \
-                                    (torch.log(z1(j, c)*z2(j, c)/(K_df(j) @ torch.exp(self.v_hat[j, :]/self.eps_df[j]))) \
-                                        - float(j == 0)*c/(self.lamda_reg*self.D) )
+                    self.u_hat_set(j, 1/(1/self.eps_df[j] + self.w[j]/(self.lamda_reg*self.D)) * \
+                                    (torch.log(z1(j, c)*z2(j, c)/(K_df(j) @ torch.exp(self.v_hat_at(j)/self.eps_df[j]))) \
+                                        - float(j == 0)*c/(self.lamda_reg*self.D) ))
                 for j in range(self.ts.T):
-                    self.v_hat[j, :] = self.eps_df[j]*lambertw((self.lamda[j]/self.eps_df[j]) * \
-                                                                (1.0/(1.0*torch.sum(self.t_idx == j))) * \
-                                                                1/(K_df(j).T @ torch.exp(self.u_hat[j]/self.eps_df[j])))
+                    self.v_hat_set(j, self.eps_df[j]*lambertw((self.lamda[j]/self.eps_df[j]) * \
+                                                                (1.0/(1.0*self.ts.N[j])) * \
+                                                                1/(K_df(j).T @ torch.exp(self.u_hat_at(j)/self.eps_df[j]))))
                     self.v_hat[j, ~self.i_indicator(j)] = 0
-                c = self.lamda_reg*self.D*torch.log(torch.sum(torch.exp((-self.w[0]*self.u_hat[0, :])/(self.lamda_reg*self.D)) * z1(0, c) * z2(0, c)))
+                c = self.lamda_reg*self.D*torch.log(torch.sum(torch.exp((-self.w[0]*self.u_hat_at(0))/(self.lamda_reg*self.D)) * z1(0, c) * z2(0, c)))
                 if i % print_interval == 0:
                     with torch.no_grad():
                         dual_obj = -self.dual_obj().item()
@@ -545,8 +586,7 @@ class OTModel(torch.nn.Module):
                 optimizer.zero_grad()
                 obj = self.dual_obj()
                 obj.backward()
-                for j in range(0, self.ts.T):
-                    self.v_hat.grad[j, self.t_idx != j] = 0
+                self.clean_v_hat_grad()
                 return obj
             with torch.no_grad():
                 dual_obj = -self.dual_obj().item()
@@ -595,10 +635,10 @@ class OTModel(torch.nn.Module):
         if method == "geo":
             K = self.get_K(i)
             gamma = self.get_coupling_reg(i, K)
-            T = gamma @ torch.diag(R[i+1, :]/R_bar[i, :])**interp_frac
+            T = gamma @ torch.diag(R[i+1]/R_bar[i])**interp_frac
             T_norm = (T/T.sum()).flatten()
         elif method == "indep":
-            T = torch.ger(R[i, :], R[i+1, :]*(R[i+1, :]/R_bar[i, :])**(interp_frac-1))
+            T = torch.ger(R[i], R[i+1]*(R[i+1]/R_bar[i])**(interp_frac-1))
             T_norm = (T/T.sum()).flatten()
         samp = np.random.choice(T_norm.shape[0], size = N, p = T_norm.detach().cpu())
         out = torch.zeros(N, coord_orig.shape[1])
@@ -606,12 +646,12 @@ class OTModel(torch.nn.Module):
             idx_i = samp[k] // T.shape[1]
             idx_j = samp[k] % T.shape[1]
             if coord_orig is not None:
-                x0 = coord_orig[idx_i, :]
-                x1 = coord_orig[idx_j, :]
+                x0 = coord_orig[idx_i]
+                x1 = coord_orig[idx_j]
             else:
-                x0 = self.x[idx_i, :]
-                x1 = self.x[idx_j, :]
-            out[k, :] = x0 + interp_frac*(x1 - x0)
+                x0 = self.x[idx_i]
+                x1 = self.x[idx_j]
+            out[k] = x0 + interp_frac*(x1 - x0)
         return out
 
     def save(self, path):
@@ -630,6 +670,7 @@ class OTModel(torch.nn.Module):
             model = dill.load(f)
             model.kernel_init()
             return model
+
 
 class OTModel_kl(OTModel):
     """Alternative OTModel for the case where the data-fitting term is pure cross-entropy
@@ -699,15 +740,15 @@ class OTModel_kl(OTModel):
         if not(log):
             v = torch.ones((self.u.shape[1], 1), requires_grad=True, device = self.device)
             for k in idx:
-                v = self.K_ij[k].T @ ((v[:, 0]*torch.exp(self.u[k, :])).view(-1, 1)) 
+                v = self.K_ij[k].T @ ((v[:, 0]*torch.exp(self.u[k])).view(-1, 1)) 
             return v[:, 0]
         else:
             v = torch.ones((self.u.shape[1], 1), requires_grad=True, device = self.device)
             shift = 0
             for k in idx:
-                m = self.u[k, :].mean()
+                m = self.u[k].mean()
                 shift = shift + m
-                v = self.K_ij[k].T @ ((v[:, 0]*torch.exp(self.u[k, :] - m)).view(-1, 1))
+                v = self.K_ij[k].T @ ((v[:, 0]*torch.exp(self.u[k] - m)).view(-1, 1))
             return shift + v[:, 0].log() 
 
     def v2(self, i, log = False):
@@ -718,15 +759,15 @@ class OTModel_kl(OTModel):
         if not(log):
             v = torch.ones((self.u.shape[1], 1), requires_grad=True, device = self.device)
             for k in idx:
-                v = self.K_ij[k-1] @ ((v[:, 0]*torch.exp(self.u[k, :])).view(-1, 1))
+                v = self.K_ij[k-1] @ ((v[:, 0]*torch.exp(self.u[k])).view(-1, 1))
             return v[:, 0]
         else:
             v = torch.ones((self.u.shape[1], 1), requires_grad=True, device = self.device)
             shift = 0
             for k in idx:
-                m = self.u[k, :].mean()
+                m = self.u[k].mean()
                 shift = shift + m
-                v = self.K_ij[k-1] @ ((v[:, 0]*torch.exp(self.u[k, :] - m)).view(-1, 1))
+                v = self.K_ij[k-1] @ ((v[:, 0]*torch.exp(self.u[k] - m)).view(-1, 1))
         return shift + v[:, 0].log()
     
     def Z(self, log = False): 
@@ -734,23 +775,23 @@ class OTModel_kl(OTModel):
         
         """
         if not(log):
-            return torch.dot(torch.exp(self.u[0, :]), self.v1(0) * self.v2(0)) 
+            return torch.dot(torch.exp(self.u[0]), self.v1(0) * self.v2(0)) 
         else:
-            return torch.logsumexp(self.u[0, :] + self.v1(0, log = True) + self.v2(0, log = True), dim = 0)
+            return torch.logsumexp(self.u[0] + self.v1(0, log = True) + self.v2(0, log = True), dim = 0)
     
     def dual_obj(self):
         """Compute dual objective 
         
         """
-        reg_dual = torch.logsumexp(self.u[0, :] + self.v1(0, log = True) + self.v2(0, log = True), dim = 0)
-        return self.lamda_reg*self.D*reg_dual + torch.sum(torch.stack([self.w[i]*self.crossent_star(-(self.lamda_reg*self.D/self.w[i])*self.u[i, :], i) for i in range(self.ts.T)])) 
+        reg_dual = torch.logsumexp(self.u[0] + self.v1(0, log = True) + self.v2(0, log = True), dim = 0)
+        return self.lamda_reg*self.D*reg_dual + torch.sum(torch.stack([self.w[i]*self.crossent_star(-(self.lamda_reg*self.D/self.w[i])*self.u[i], i) for i in range(self.ts.T)])) 
     
     def primal_obj(self):
         """Compute primal objective
         """
         def reg():
             norm_const = self.Z()
-            return (1/norm_const)*torch.stack([torch.dot(self.u[i, :]*torch.exp(self.u[i, :]), self.v1(i)*self.v2(i)) for i in range(0, self.ts.T)]).sum() - torch.log(norm_const)
+            return (1/norm_const)*torch.stack([torch.dot(self.u[i]*torch.exp(self.u[i]), self.v1(i)*self.v2(i)) for i in range(0, self.ts.T)]).sum() - torch.log(norm_const)
         def xent(a, b):
             out = a*torch.log(a/b)
             out[a == 0] = 0
@@ -759,7 +800,7 @@ class OTModel_kl(OTModel):
             return x/x.sum()
         with torch.no_grad():
             p_all = self.get_R()
-        return self.lamda_reg*self.D*reg() + torch.dot(self.w, torch.stack([xent(normalise((self.i_indicator(i))*1.0), p_all[i, :]) for i in range(self.ts.T)]))
+        return self.lamda_reg*self.D*reg() + torch.dot(self.w, torch.stack([xent(normalise((self.i_indicator(i))*1.0), p_all[i]) for i in range(self.ts.T)]))
 
     def get_gamma_branch(self, i):
         pass
@@ -774,7 +815,7 @@ class OTModel_kl(OTModel):
         if i is None:
             return torch.stack([self.get_R(i) for i in range(0, self.ts.T)])
         else:
-            return ((self.u[i, :] + self.v1(i, log = True) + self.v2(i, log = True)) - self.Z(log = True)).exp()
+            return ((self.u[i] + self.v1(i, log = True) + self.v2(i, log = True)) - self.Z(log = True)).exp()
 
     def solve_lbfgs(self, max_iter = 50, steps = 10, lr = 0.01, max_eval = None, history_size = 100, line_search_fn = 'strong_wolfe', factor = 1, retry_max = 1, tol = 5e-3):
         """Solve using LBFGS
@@ -837,4 +878,158 @@ class OTModel_ot(OTModel):
         p = (1.0*(self.i_indicator(i)))
         p = p/p.sum()
         return torch.sum(p * u)
+
+
+class OTModel_SW(OTModel):
+    """gWOT model class with sliding window in time for the marginal support.
+    This decreases the computational complexity from O(T(N*T)^2) to O(T(N*2*`hws`)^2),
+    where N is the average number of particles per timepoint.
+
+    :param hws: Half-window size excluding center, such that total window size is 2*`hws`+1.
+    """
+    def __init__(self, *args, hws = 2, **kwargs):
+        # Get arguments
+        ts = args[0]
+        device = torch.device("cpu") if kwargs["device"] is None else kwargs["device"]
+        
+        # Create variables specific to the sliding window
+        self.hws = hws      # Half-window size
+        self.win_indicator = [(ts.t_idx >= i-self.hws) & (ts.t_idx <= i+self.hws) for i in range(ts.T)]
+        self.t_idx_sw = [torch.tensor(ts.t_idx[self.win_indicator[i]]) for i in range(ts.T)]  # List of time indexes for each support
+        self.ss = [v.shape[0] for v in self.t_idx_sw]  # List of support sizes
+        self.ssc = np.pad(np.cumsum(self.ss),(1,0))  # Cumulated support sizes, starting with 0
+
+        # pi_0 (initial distribution for reference process)
+        pi_0 = kwargs["pi_0"]
+        if type(pi_0) is not str:
+            pass
+        elif pi_0 == 'uniform':
+            pi_0 = torch.ones(self.ss[0], device = device)/self.ss[0]
+        elif pi_0 == 'stationary':
+            pi_0 = None
+        else:
+            raise ValueError("pi0 must either be a `torch.Tensor`, or one of 'uniform' or 'stationary'")
+        kwargs["pi_0"] = pi_0
+
+        # Use OTModel initialization
+        super().__init__(*args, **kwargs)
+
+
+    def kernel_init(self,):
+        if self.use_keops:
+            # construct LazyTensor kernel for reg functional
+            x_t = [LazyTensor(self.x[(self.t_idx >= i-self.hws) & (self.t_idx <= i+self.hws)].view(-1, 1, self.x.shape[1])) for i in range(0, self.ts.T)]     # (N_i, N_i+1)
+            x_tp1 = [LazyTensor(self.x[(self.t_idx >= i-self.hws) & (self.t_idx <= i+self.hws)].view(1, -1, self.x.shape[1])) for i in range(1, self.ts.T)]
+            D_ij = [((x_t[i] - x_tp1[i])**2/(self.eps[i]*self.c_scale[i])).sum(2) for i in range(0, self.ts.T-1)]
+            Z_ij = [(-D).exp() for D in D_ij] # Kernel matrix
+            M_sums_i = [LazyTensor(1/M.sum(dim = 1), axis = 1).T for M in Z_ij]     # Row-sums
+            self.K_ij = [Z_ij[i]*M_sums_i[i] for i in range(0, len(Z_ij))]  # Row-normalized
+
+            if self.pi_0 is None:
+                raise NotImplementedError()
+            self.K_ij[0] = LazyTensor(self.pi_0.view(-1, 1, 1))*self.K_ij[0]     # (N_i, N_i+1)
+            # construct LazyTensor kernel for data-fitting functional
+            D_ij_df = [((x_t[i] - x_t[i].T)**2/(self.eps_df[i]*self.c_scale_df[i])).sum(2) for i in range(0, self.ts.T)]
+            self.K_ij_df = [(-D).exp() for D in D_ij_df] 
+        else:
+            # do not use keops
+            x_t = [self.x[(self.t_idx >= i-self.hws) & (self.t_idx <= i+self.hws)].view(-1, 1, self.x.shape[1]) for i in range(0, self.ts.T)]       # (N_i, N_i+1)
+            x_tp1 = [self.x[(self.t_idx >= i-self.hws) & (self.t_idx <= i+self.hws)].view(1, -1, self.x.shape[1]) for i in range(1, self.ts.T)]
+            Z_ij = [(-(x_t[i] - x_tp1[i])**2/(self.eps[i]*self.c_scale[i])).sum(2).exp() for i in range(0, self.ts.T-1)]
+            self.K_ij = [M/M.sum(dim = 1,keepdims=True) for M in Z_ij]
+
+            if self.pi_0 is None:
+                raise NotImplementedError()
+            self.K_ij[0] = self.pi_0.reshape(-1, 1) * self.K_ij[0]      # (N_i, N_i+1)
+            # now construct kernel for data fitting
+            self.K_ij_df = [(-(x_t[i] - x_t[i].reshape(1,-1,self.x.shape[1]))**2/(self.eps_df[i]*self.c_scale_df[i])).sum(2).exp() for i in range(0, self.ts.T)]
+
+
+    def uv_init(self, u_hat = None, v_hat = None):
+        """Initialise dual variables :math:`\\{\\hat{u}_i, \\hat{v}_i\\}_i` for model."""
+        if u_hat is None:
+            u_hat = torch.concatenate([torch.zeros(s, device = self.device) for s in self.ss])
+        if v_hat is None:
+            v_hat = torch.concatenate([torch.zeros(s, device = self.device) for s in self.ss])
+        for i in range(0, self.ts.T):
+            v_hat[self.ssc[i]:self.ssc[i+1]][~self.i_indicator(i)] = -self.lamda[i]
+        self.register_parameter(name = 'u_hat', param = torch.nn.Parameter(Variable(u_hat, requires_grad = True)))
+        self.register_parameter(name = 'v_hat', param = torch.nn.Parameter(Variable(v_hat, requires_grad = True)))
+        
+    def u_hat_at(self,i):
+        """Access i-th element of u_hat, from the concatenated vector of SW support"""
+        return self.u_hat[self.ssc[i]:self.ssc[i+1]]
+
+    def v_hat_at(self,i):
+        """Access i-th element of v_hat, from the concatenated vector of SW support"""
+        return self.v_hat[self.ssc[i]:self.ssc[i+1]]
     
+    def u_hat_set(self,i,vec):
+        """Set i-th element of u_hat as vec"""
+        self.u_hat[self.ssc[i]:self.ssc[i+1]] = vec
+
+    def v_hat_set(self,i,vec):
+        """Set i-th element of v_hat as vec"""
+        self.v_hat[self.ssc[i]:self.ssc[i+1]] = vec
+
+    def clean_v_hat_grad(self):
+        """Sets to 0 all the values of v_hat.grad that are not on the actual support of timepoint i"""
+        for i in range(0, self.ts.T):
+            self.v_hat.grad[self.ssc[i]:self.ssc[i+1]][~self.i_indicator(i)] = 0
+
+    def i_indicator(self,i):
+        """Returns the indicator function (bool vector) for the timepoint i within the window of timepoint i"""
+        return self.t_idx_sw[i] == i
+
+    def R_container(self, R):
+        """Returns R as a list, and not as a stacked tensor"""
+        return R
+
+    def initialize_phi(self):
+        """Use a list of vectors instead of a stacked tensor"""
+        return [torch.zeros(s, device = self.device) for s in self.ss[:-1]]
+
+    def get_R(self, i=None, all_as_sparse=False):
+        """Get reconstructed marginals :math:`\\mathbf{R}_{t_i}` at timepoint `i`.
+        """
+        if all_as_sparse:
+            if i is not None:
+                raise ValueError("all_as_sparse=True is only valid if i is None.")
+            with torch.no_grad():
+                R = super().get_R()
+            data = torch.concatenate(R).detach().numpy()
+            indices = np.hstack([np.where(a)[0] for a in self.win_indicator])
+            indptr = self.ssc
+            return scipy.sparse.csr_array((data, indices, indptr), shape=(self.ts.T, self.ts.x.shape[0]))
+        else:
+            return super().get_R(i)
+
+    def get_g(self,i,supp_j=None):
+        """Return values of g at timepoint i, on the support of timepoint supp_j.
+        This is useful in particular when we multiply g_i with psi_next, which has
+        the support of timepoint i+1.
+        """
+        supp_j = i if supp_j is None else supp_j
+        return self.g[i][self.win_indicator[supp_j]]
+
+    ## This function is only useful if we accept that the user passes for g, a list of vectors
+    ## of the right support size (like self.t_idx_sw). For now, it's unrealistic to expect the user
+    ## to do that. For now, the user needs to pass a (T,x.shape[0]) array for g.
+    ## It would only be used when g is multiplied by psi_next.
+    # def get_g_for_psi_next(self,i):
+    #     """Returns a growth vector at time i that has the right size to be multiplied to psi_next.
+    #     This is because phi_next is supported on the i+1 timepoint.
+    #     """
+    #     if self.g_constant_in_time:
+    #         g_adapted = self.g[i+1] # g[i+1] is always the right size 
+    #     elif i >= self.ts.T-1 - self.hws:
+    #         # g_adapted = self.g[i][self.ts.N[i-self.hws]:]                       # Use only g[i]
+    #         g_adapted = torch.sqrt(self.g[i+1] * self.g[i][self.ts.N[i-self.hws]:])
+    #     elif i >= self.hws:
+    #         # g_adapted = torch.concatenate((self.g[i][self.ts.N[i-self.hws]:],self.g[i+1][-self.ts.N[i+self.hws+1]:]))     # Use only g[i] as much as possible, and g[i+1] where we can't
+    #         g_adapted = torch.sqrt(self.g[i+1] * torch.concatenate((self.g[i][self.ts.N[i-self.hws]:],self.g[i+1][-self.ts.N[i+self.hws+1]:])))
+    #     else:
+    #         # g_adapted = torch.concatenate((self.g[i],self.g[i+1][-self.ts.N[i+self.hws+1]:]))     # Use only g[i] as much as possible, and g[i+1] where we can't
+    #         g_adapted = torch.sqrt(self.g[i+1] * torch.concatenate((self.g[i],self.g[i+1][-self.ts.N[i+self.hws+1]:])))
+    #     return g_adapted
+
