@@ -587,7 +587,7 @@ class OTModel(torch.nn.Module):
     
     def solve_lbfgs(self, max_iter = 50, steps = 10, lr = 0.01, max_eval = None, 
                     history_size = 100, line_search_fn = 'strong_wolfe', 
-                    factor = 1, retry_max = 1, tol = 5e-3):
+                    factor = 1, retry_max = 1, tol = 5e-3, verbose=1):
         """Solve using LBFGS (works in the general case)
 
         :param max_iter: max LBFGS iterations per step (passed to `torch.optim.LBFGS`)
@@ -609,27 +609,36 @@ class OTModel(torch.nn.Module):
         u_hat_last = self.u_hat.clone()
         v_hat_last = self.v_hat.clone()
         retries = retry_max
+        self.last_grads_norm = None
+        self.last_dual_obj = 0.0
+        self.lbfgs_state = None
         for i in range(0, steps):
             def closure():
                 optimizer.zero_grad()
                 obj = self.dual_obj()
                 obj.backward()
                 self.clean_v_hat_grad()
+                self.last_grads_norm = (np.linalg.norm(self.u_hat.grad.numpy()).item(),np.linalg.norm(self.v_hat.grad.numpy()).item())
                 return obj
             with torch.no_grad():
                 dual_obj = -self.dual_obj().item()
                 primal_obj = self.primal_obj().item()
-            print("Iteration = ", i, " Dual obj = ", dual_obj, " Primal_obj = ", primal_obj, 
-                " Gap = ", primal_obj - dual_obj, "Sum = ", self.get_R(0).sum().item())
-            if abs(primal_obj - dual_obj) < tol:
+            if verbose>=1: print("Iteration =", i, " Dual obj =", dual_obj, " Primal_obj =", primal_obj, 
+                " Gap =", primal_obj - dual_obj, " Sum =", self.get_R(0).sum().item())
+            if verbose>=2: print("Iteration =", i, " Dual obj =", dual_obj, " Primal_obj =", primal_obj, 
+                " Gap =", primal_obj - dual_obj, " Grad_norm =",self.last_grads_norm, " Sum =", self.get_R(0).sum().item())
+            if abs(primal_obj - dual_obj) < tol or dual_obj == self.last_dual_obj:
+                # Add last obj value
+                obj_vals += [(obj_vals[-1][0], primal_obj, dual_obj, primal_obj - dual_obj),] 
                 break
+            self.last_dual_obj = dual_obj
             if math.isnan(dual_obj):
                 if retries <= 0:
                     lr = lr/factor
                     retries = retry_max
                 else:
                     retries -= 1
-                print("Warning: NaN encountered, restarting and scaling down learning rate. lr_new = %f" % lr)
+                if verbose>=1: print("Warning: NaN encountered, restarting and scaling down learning rate. lr_new = %f" % lr)
                 # restart optimization
                 self.uv_init(u_hat_last.clone(), v_hat_last.clone())
                 optimizer = torch.optim.LBFGS(self.parameters(), 
@@ -639,7 +648,12 @@ class OTModel(torch.nn.Module):
                                                 max_eval = max_eval, 
                                                 line_search_fn=line_search_fn)
             else:
-                obj_vals += [(i*max_iter, dual_obj), ]
+                if i==0:
+                    obj_vals += [(0, dual_obj), ]
+                else:
+                    # Add real number of iterations and not max_iter
+                    self.lbfgs_state = optimizer.state[optimizer._params[0]]    # Weird way of Pytorch's LBFGS to store its state
+                    obj_vals += [(obj_vals[-1][0]+self.lbfgs_state["n_iter"], primal_obj, dual_obj, primal_obj - dual_obj),] 
                 u_hat_last = self.u_hat.clone()
                 v_hat_last = self.v_hat.clone()
             optimizer.step(closure = closure)
