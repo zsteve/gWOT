@@ -9,6 +9,7 @@ import os
 import dill
 import scipy.sparse
 from scipy.sparse.linalg import aslinearoperator, eigs, LinearOperator
+import anndata
 
 from gwot.lambertw import lambertw
 from gwot.ts import TimeSeries
@@ -421,6 +422,33 @@ class OTModel(torch.nn.Module):
                 return (((K @ torch.diag(torch.exp(v0/self.eps[0] - logZ))).T * torch.exp(u0/self.eps[0])).T)
         else:
             raise ValueError("Index i must be a non-negative integer")
+
+    def save_all_transport_maps(self, output_dir=".", tmap_prefix='tmap'):
+        """
+        Save the temporal transport maps (couplings)
+
+        Parameters
+        ----------
+        output_dir : str, optional
+            Path for output transport maps
+        tmap_prefix : str, optional
+            Prefix for output transport maps
+
+        Returns
+        -------
+        None
+            Only computes and saves all transport maps, does not return them.
+        """
+
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir,exist_ok=True)
+
+        for i in range(self.ts.T-1):
+            tmap = self.get_coupling_reg(i).detach().numpy()
+            adata = anndata.AnnData(X=tmap,
+                                    obs={"g_t%d"%i:self.get_g(i)},
+                                    var={"g_t%d"%(i+1):self.get_g(i+1)})
+            anndata.io.write_h5ad(os.path.join(output_dir,tmap_prefix+"_%d_%d.h5ad"%(i,i+1)),adata)
 
     def get_R(self, i = None): 
         """Get reconstructed marginal :math:`\\mathbf{R}_{t_i}` at timepoint `i`.
