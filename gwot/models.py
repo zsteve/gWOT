@@ -10,6 +10,8 @@ import dill
 import scipy.sparse
 from scipy.sparse.linalg import aslinearoperator, eigs, LinearOperator
 import anndata
+import pandas as pd
+import scanpy as sc
 
 from gwot.lambertw import lambertw
 from gwot.ts import TimeSeries
@@ -423,6 +425,17 @@ class OTModel(torch.nn.Module):
         else:
             raise ValueError("Index i must be a non-negative integer")
 
+    def get_coupling_reg_as_anndata(self, i, K = None):
+        """Wrapper of `get_coupling_reg()` to get the OT coupling as an `anndata` object"""
+        K = self.K_ij[i] if K is None else K
+        if type(K) is LazyTensor:
+                raise NotImplementedError("Cannot transform LazyTensor to Numpy array")
+        tmap = self.get_coupling_reg(i, K).detach().numpy()
+        obs_df = pd.DataFrame(index=self.ts.obs_x.index if self.ts.obs_x is not None else None, data={"g_t%d"%i:self.get_g(i)})
+        var_df = pd.DataFrame(index=self.ts.obs_x.index if self.ts.obs_x is not None else None, data={"g_t%d"%(i+1):self.get_g(i+1)})
+        return anndata.AnnData(X=tmap, obs=obs_df, var=var_df)
+    
+
     def save_all_transport_maps(self, output_dir=".", tmap_prefix='tmap'):
         """
         Save the temporal transport maps (couplings)
@@ -437,18 +450,44 @@ class OTModel(torch.nn.Module):
         Returns
         -------
         None
-            Only computes and saves all transport maps, does not return them.
+            Only saves all transport maps, does not return them.
         """
 
         if not os.path.exists(output_dir):
             os.makedirs(output_dir,exist_ok=True)
 
         for i in range(self.ts.T-1):
-            tmap = self.get_coupling_reg(i).detach().numpy()
-            adata = anndata.AnnData(X=tmap,
-                                    obs={"g_t%d"%i:self.get_g(i)},
-                                    var={"g_t%d"%(i+1):self.get_g(i+1)})
+            adata = self.get_coupling_reg_as_anndata(i)
             anndata.io.write_h5ad(os.path.join(output_dir,tmap_prefix+"_%d_%d.h5ad"%(i,i+1)),adata)
+
+
+    def get_transition_matrix(self, i, celltype_key, norm_axis=0):
+        """
+        Get the cell type transition matrix at time i
+
+        Parameters
+        ----------
+        i : int
+            Time index of the transition (i,i+1)
+        celltype_key : str
+            Key to the column in obs_x that contains the cell types.
+        norm_axis : int
+            Normalize the rows (0) or columns (1) to sum to 1, or don't normalize (None)
+
+        Returns
+        -------
+        pd.DataFrame with cell types as row and colums
+            
+        """
+        tmap = self.get_coupling_reg_as_anndata(i)
+        # Add cell type information
+        tmap.obs[celltype_key] = self.ts.obs_x[celltype_key][tmap.obs.index]
+        tmap.var[celltype_key] = self.ts.obs_x[celltype_key][tmap.var.index]
+        # Aggregate over cell types and transform to dataframe
+        table = sc.get.aggregate(sc.get.aggregate(tmap,celltype_key,"sum",axis=0),celltype_key,"sum",axis=1,layer="sum").to_df(layer="sum")
+        # Return (normalized) matrix
+        return table.div(table.sum(axis=1-norm_axis), axis=norm_axis) if norm_axis is not None else table
+
 
     def get_R(self, i = None): 
         """Get reconstructed marginal :math:`\\mathbf{R}_{t_i}` at timepoint `i`.
@@ -1053,6 +1092,16 @@ class OTModel_SW(OTModel):
             return scipy.sparse.csr_array((data, indices, indptr), shape=(self.ts.T, self.ts.x.shape[0]))
         else:
             return super().get_R(i)
+
+    def get_coupling_reg_as_anndata(self, i, K = None):
+        """Wrapper of `get_coupling_reg()` to get the OT coupling as an `anndata` object"""
+        K = self.K_ij[i] if K is None else K
+        if type(K) is LazyTensor:
+                raise NotImplementedError("Cannot transform a LazyTensor to Numpy array")
+        tmap = self.get_coupling_reg(i, K).detach().numpy()
+        obs_df = pd.DataFrame(index=self.ts.obs_x.index[self.win_indicator[i]] if self.ts.obs_x is not None else None, data={"g_t%d"%i:self.get_g(i)})
+        var_df = pd.DataFrame(index=self.ts.obs_x.index[self.win_indicator[i+1]] if self.ts.obs_x is not None else None, data={"g_t%d"%(i+1):self.get_g(i+1)})
+        return anndata.AnnData(X=tmap, obs=obs_df, var=var_df)
 
     def get_g(self,i,supp_j=None):
         """Return values of g at timepoint i, on the support of timepoint supp_j.
